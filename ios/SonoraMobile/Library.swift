@@ -1,0 +1,730 @@
+import SwiftUI
+
+// MARK: - Navegación
+
+/// Las páginas a las que se puede ir desde cualquier pestaña.
+enum Route: Hashable {
+    case album(slug: String, id: String)
+    case playlist(slug: String, id: String)
+    case artist(slug: String, id: String)
+}
+
+private struct OpenRouteKey: EnvironmentKey {
+    static let defaultValue: (Route) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+    /// Abre una página en la pestaña actual (para botones y menús, donde un enlace no sirve).
+    var openRoute: (Route) -> Void {
+        get { self[OpenRouteKey.self] }
+        set { self[OpenRouteKey.self] = newValue }
+    }
+}
+
+/// Una pila de navegación que sabe abrir álbumes, playlists y artistas.
+struct RoutedStack<Content: View>: View {
+    @State private var path = NavigationPath()
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            content()
+                .navigationDestination(for: Route.self) { route in
+                    switch route {
+                    case .album(let slug, let id): AlbumView(slug: slug, id: id)
+                    case .playlist(let slug, let id): PlaylistView(slug: slug, id: id)
+                    case .artist(let slug, let id): ArtistView(slug: slug, id: id)
+                    }
+                }
+        }
+        .environment(\.openRoute, { route in path.append(route) })
+    }
+}
+
+/// Carga algo del motor fuera del hilo principal y lo muestra, con espera y reintento.
+struct Loader<Value, Content: View>: View {
+    @EnvironmentObject private var store: Store
+    let key: String
+    let load: (Engine) throws -> Value
+    @ViewBuilder let content: (Value) -> Content
+    @State private var value: Value?
+    @State private var loaded: String?
+    @State private var failure: String?
+
+    var body: some View {
+        Group {
+            if let value, loaded == key {
+                content(value)
+            } else if let failure {
+                VStack(spacing: 12) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text(failure)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.secondary)
+                    Button("Reintentar") { Task { await fetch() } }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .task(id: key) { await fetch() }
+    }
+
+    private func fetch() async {
+        failure = nil
+        let wanted = key
+        switch await store.run(load) {
+        case .success(let found):
+            value = found
+            loaded = wanted
+        case .failure(let error):
+            failure = describe(error)
+        }
+    }
+}
+
+struct ProviderPicker: View {
+    @EnvironmentObject private var store: Store
+
+    var body: some View {
+        if store.signedIn.count > 1 {
+            Picker("Servicio", selection: $store.selected) {
+                ForEach(store.signedIn, id: \.slug) { provider in
+                    Text(provider.name).tag(provider.slug)
+                }
+            }
+            .pickerStyle(.segmented)
+        }
+    }
+}
+
+struct NeedsAccount: View {
+    var body: some View {
+        Text("Primero entra en la pestaña **Cuentas** y elige YouTube Music (se puede sin cuenta) o Spotify.")
+            .foregroundStyle(.secondary)
+            .padding()
+    }
+}
+
+// MARK: - Menú de canción
+
+extension View {
+    /// El menú que aparece al mantener pulsada una canción.
+    func trackMenu(_ track: TrackItem, slug: String) -> some View {
+        modifier(TrackMenu(track: track, slug: slug))
+    }
+}
+
+struct TrackMenu: ViewModifier {
+    @EnvironmentObject private var store: Store
+    @Environment(\.openRoute) private var open
+    let track: TrackItem
+    let slug: String
+
+    func body(content: Content) -> some View {
+        let store = self.store
+        let open = self.open
+        let track = self.track
+        let slug = self.slug
+        return content.contextMenu {
+            Button {
+                store.enqueue([track], next: true, from: slug)
+            } label: {
+                Label("Reproducir a continuación", systemImage: "text.line.first.and.arrowtriangle.forward")
+            }
+            Button {
+                store.enqueue([track], next: false, from: slug)
+            } label: {
+                Label("Agregar a la cola", systemImage: "text.append")
+            }
+            Button {
+                store.startRadio(track, from: slug)
+            } label: {
+                Label("Iniciar radio", systemImage: "dot.radiowaves.left.and.right")
+            }
+            Button {
+                store.save(.track, id: track.id, from: slug)
+            } label: {
+                Label("Guardar en tu biblioteca", systemImage: "heart")
+            }
+            if let album = track.albumId {
+                Button {
+                    open(.album(slug: slug, id: album))
+                } label: {
+                    Label("Ir al álbum", systemImage: "square.stack")
+                }
+            }
+            if let artist = track.artistId {
+                Button {
+                    open(.artist(slug: slug, id: artist))
+                } label: {
+                    Label("Ir al artista", systemImage: "music.mic")
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Tarjetas y filas
+
+struct MediaCard: View {
+    @Environment(\.openRoute) private var open
+    let item: MediaItem
+    let slug: String
+    let onPlay: () -> Void
+
+    var body: some View {
+        switch item {
+        case .track(let track):
+            Button(action: onPlay) {
+                card(track.cover, track.title, track.artists)
+            }
+            .buttonStyle(.plain)
+            .trackMenu(track, slug: slug)
+        case .album(let album):
+            Button { open(.album(slug: slug, id: album.id)) } label: {
+                card(album.cover, album.title, subtitle(album))
+            }
+            .buttonStyle(.plain)
+        case .artist(let artist):
+            Button { open(.artist(slug: slug, id: artist.id)) } label: {
+                card(artist.cover, artist.name, "Artista", round: true)
+            }
+            .buttonStyle(.plain)
+        case .playlist(let playlist):
+            Button { open(.playlist(slug: slug, id: playlist.id)) } label: {
+                card(playlist.cover, playlist.title, playlist.owner)
+            }
+            .buttonStyle(.plain)
+        case .genre(_, let title, let cover):
+            card(cover, title, "")
+                .opacity(0.6)
+        }
+    }
+
+    private func card(_ cover: String?, _ title: String, _ subtitle: String, round: Bool = false) -> some View {
+        VStack(alignment: round ? .center : .leading, spacing: 4) {
+            Cover(url: cover, size: 140, round: round)
+            Text(title)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(2)
+                .multilineTextAlignment(round ? .center : .leading)
+            if !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(width: 140, alignment: round ? .center : .leading)
+        .contentShape(Rectangle())
+    }
+
+    private func subtitle(_ album: AlbumItem) -> String {
+        album.year > 0 ? "\(album.kind) · \(album.year)" : album.artists
+    }
+}
+
+struct PlaylistRow: View {
+    let playlist: PlaylistItem
+    let slug: String
+
+    var body: some View {
+        NavigationLink(value: Route.playlist(slug: slug, id: playlist.id)) {
+            HStack(spacing: 12) {
+                Cover(url: playlist.cover, size: 52)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(playlist.title).lineLimit(1)
+                    Text(playlist.trackCount > 0 ? "\(playlist.owner) · \(playlist.trackCount) canciones" : playlist.owner)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+}
+
+struct AlbumRow: View {
+    let album: AlbumItem
+    let slug: String
+
+    var body: some View {
+        NavigationLink(value: Route.album(slug: slug, id: album.id)) {
+            HStack(spacing: 12) {
+                Cover(url: album.cover, size: 52)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(album.title).lineLimit(1)
+                    Text(album.year > 0 ? "\(album.artists) · \(album.year)" : album.artists)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+}
+
+struct ArtistRow: View {
+    let artist: ArtistItem
+    let slug: String
+
+    var body: some View {
+        NavigationLink(value: Route.artist(slug: slug, id: artist.id)) {
+            HStack(spacing: 12) {
+                Cover(url: artist.cover, size: 52, round: true)
+                Text(artist.name).lineLimit(1)
+            }
+        }
+    }
+}
+
+/// Una fila horizontal de álbumes, para la página de artista.
+struct AlbumShelf: View {
+    let title: String
+    let albums: [AlbumItem]
+    let slug: String
+
+    var body: some View {
+        if !albums.isEmpty {
+            Section(title) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 12) {
+                        ForEach(albums, id: \.id) { album in
+                            MediaCard(item: .album(album: album), slug: slug) {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Inicio
+
+struct HomeView: View {
+    @EnvironmentObject private var store: Store
+
+    var body: some View {
+        RoutedStack {
+            Group {
+                if store.signedIn.isEmpty {
+                    NeedsAccount()
+                } else {
+                    let slug = store.selected
+                    Loader(key: slug, load: { try $0.home(slug: slug) }) { shelves in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 28) {
+                                ProviderPicker().padding(.horizontal)
+                                if shelves.isEmpty {
+                                    Text("Este servicio no tiene página de inicio para esta cuenta.")
+                                        .foregroundStyle(.secondary)
+                                        .padding()
+                                }
+                                ForEach(Array(shelves.enumerated()), id: \.offset) { _, shelf in
+                                    ShelfView(shelf: shelf, slug: slug)
+                                }
+                            }
+                            .padding(.vertical)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Inicio")
+            .withPlayerBar()
+        }
+    }
+}
+
+struct ShelfView: View {
+    @EnvironmentObject private var store: Store
+    let shelf: Shelf
+    let slug: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(shelf.title)
+                .font(.title3.bold())
+                .padding(.horizontal)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(Array(shelf.items.enumerated()), id: \.offset) { index, item in
+                        MediaCard(item: item, slug: slug) { play(from: index) }
+                    }
+                }
+                .padding(.horizontal)
+            }
+        }
+    }
+
+    /// Reproduce las canciones del estante, empezando por la que se tocó.
+    private func play(from index: Int) {
+        let tracks = shelf.items.compactMap { item -> TrackItem? in
+            if case .track(let track) = item { return track }
+            return nil
+        }
+        guard case .track(let tapped) = shelf.items[index],
+              let start = tracks.firstIndex(where: { $0.id == tapped.id })
+        else { return }
+        store.play(tracks, at: start, from: slug)
+    }
+}
+
+// MARK: - Biblioteca
+
+enum LibrarySection: String, CaseIterable, Identifiable {
+    case playlists = "Playlists"
+    case tracks = "Canciones"
+    case albums = "Álbumes"
+    case artists = "Artistas"
+
+    var id: String { rawValue }
+}
+
+struct LibraryView: View {
+    @EnvironmentObject private var store: Store
+    @State private var section = LibrarySection.playlists
+
+    var body: some View {
+        RoutedStack {
+            Group {
+                if store.signedIn.isEmpty {
+                    NeedsAccount()
+                } else {
+                    VStack(spacing: 8) {
+                        ProviderPicker().padding(.horizontal)
+                        Picker("Sección", selection: $section) {
+                            ForEach(LibrarySection.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.horizontal)
+                        LibrarySectionView(section: section, slug: store.selected)
+                    }
+                }
+            }
+            .navigationTitle("Biblioteca")
+            .withPlayerBar()
+        }
+    }
+}
+
+struct LibrarySectionView: View {
+    @EnvironmentObject private var store: Store
+    let section: LibrarySection
+    let slug: String
+
+    var body: some View {
+        switch section {
+        case .playlists:
+            Loader(key: "playlists-\(slug)", load: { try $0.libraryPlaylists(slug: slug) }) { playlists in
+                List(playlists, id: \.id) { PlaylistRow(playlist: $0, slug: slug) }
+                    .listStyle(.plain)
+                    .overlay { if playlists.isEmpty { Empty() } }
+            }
+        case .tracks:
+            Loader(key: "tracks-\(slug)", load: { try $0.libraryTracks(slug: slug) }) { tracks in
+                List {
+                    if !tracks.isEmpty {
+                        PlayButtons(tracks: tracks, slug: slug)
+                    }
+                    TrackList(tracks: tracks, slug: slug)
+                }
+                .listStyle(.plain)
+                .overlay { if tracks.isEmpty { Empty() } }
+            }
+        case .albums:
+            Loader(key: "albums-\(slug)", load: { try $0.libraryAlbums(slug: slug) }) { albums in
+                List(albums, id: \.id) { AlbumRow(album: $0, slug: slug) }
+                    .listStyle(.plain)
+                    .overlay { if albums.isEmpty { Empty() } }
+            }
+        case .artists:
+            Loader(key: "artists-\(slug)", load: { try $0.libraryArtists(slug: slug) }) { artists in
+                List(artists, id: \.id) { ArtistRow(artist: $0, slug: slug) }
+                    .listStyle(.plain)
+                    .overlay { if artists.isEmpty { Empty() } }
+            }
+        }
+    }
+
+    private struct Empty: View {
+        var body: some View {
+            Text("Nada guardado aquí todavía.").foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// "Reproducir" y "Aleatorio" para una lista de canciones.
+struct PlayButtons: View {
+    @EnvironmentObject private var store: Store
+    let tracks: [TrackItem]
+    let slug: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button {
+                store.play(tracks, at: 0, from: slug)
+            } label: {
+                Label("Reproducir", systemImage: "play.fill").frame(maxWidth: .infinity)
+            }
+            Button {
+                store.play(tracks.shuffled(), at: 0, from: slug)
+            } label: {
+                Label("Aleatorio", systemImage: "shuffle").frame(maxWidth: .infinity)
+            }
+        }
+        .buttonStyle(.bordered)
+        .listRowSeparator(.hidden)
+        .disabled(tracks.isEmpty)
+    }
+}
+
+// MARK: - Páginas
+
+struct AlbumView: View {
+    @EnvironmentObject private var store: Store
+    let slug: String
+    let id: String
+
+    var body: some View {
+        Loader(key: id, load: { try $0.album(slug: slug, id: id) }) { page in
+            List {
+                VStack(spacing: 8) {
+                    Cover(url: page.album.coverLarge, size: 220)
+                        .shadow(radius: 8, y: 4)
+                    Text(page.album.title)
+                        .font(.title3.bold())
+                        .multilineTextAlignment(.center)
+                    if let artist = page.album.artistId {
+                        NavigationLink(value: Route.artist(slug: slug, id: artist)) {
+                            Text(page.album.artists).foregroundStyle(Color.accentColor)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text(page.album.artists).foregroundStyle(.secondary)
+                    }
+                    Text(page.album.year > 0 ? "\(page.album.kind) · \(page.album.year)" : page.album.kind)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .listRowSeparator(.hidden)
+                PlayButtons(tracks: page.tracks, slug: slug)
+                TrackList(tracks: page.tracks, slug: slug, numbered: true, covers: false)
+                if !page.label.isEmpty || !page.releaseDate.isEmpty {
+                    Text([page.releaseDate, page.label].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .listRowSeparator(.hidden)
+                }
+            }
+            .listStyle(.plain)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        store.save(.album, id: id, from: slug)
+                    } label: {
+                        Image(systemName: "heart")
+                    }
+                }
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .withPlayerBar()
+    }
+}
+
+struct PlaylistView: View {
+    let slug: String
+    let id: String
+
+    var body: some View {
+        Loader(key: id, load: { try $0.playlist(slug: slug, id: id) }) { page in
+            PlaylistBody(page: page, slug: slug)
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .withPlayerBar()
+    }
+}
+
+struct PlaylistBody: View {
+    @EnvironmentObject private var store: Store
+    let page: PlaylistPage
+    let slug: String
+    @State private var tracks: [TrackItem]
+    @State private var continuation: String?
+    @State private var loading = false
+
+    init(page: PlaylistPage, slug: String) {
+        self.page = page
+        self.slug = slug
+        _tracks = State(initialValue: page.tracks)
+        _continuation = State(initialValue: page.continuation)
+    }
+
+    var body: some View {
+        List {
+            VStack(spacing: 8) {
+                Cover(url: page.playlist.cover, size: 220)
+                    .shadow(radius: 8, y: 4)
+                Text(page.playlist.title)
+                    .font(.title3.bold())
+                    .multilineTextAlignment(.center)
+                Text(page.playlist.owner).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .listRowSeparator(.hidden)
+            PlayButtons(tracks: tracks, slug: slug)
+            TrackList(tracks: tracks, slug: slug)
+            if let continuation {
+                Button(loading ? "Cargando…" : "Cargar más") { more(continuation) }
+                    .disabled(loading)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .listStyle(.plain)
+        .toolbar {
+            if !page.playlist.owned {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        store.save(.playlist, id: page.playlist.id, from: slug)
+                    } label: {
+                        Image(systemName: "heart")
+                    }
+                }
+            }
+        }
+    }
+
+    private func more(_ next: String) {
+        loading = true
+        let slug = self.slug
+        Task {
+            switch await store.run({ try $0.playlistMore(slug: slug, continuation: next) }) {
+            case .success(let page):
+                tracks += page.tracks
+                continuation = page.continuation
+            case .failure(let error):
+                store.problem = describe(error)
+            }
+            loading = false
+        }
+    }
+}
+
+struct ArtistView: View {
+    @EnvironmentObject private var store: Store
+    let slug: String
+    let id: String
+    @State private var biography = false
+
+    var body: some View {
+        Loader(key: id, load: { try $0.artist(slug: slug, id: id) }) { page in
+            List {
+                VStack(spacing: 8) {
+                    Cover(url: page.cover, size: 180, round: true)
+                        .shadow(radius: 8, y: 4)
+                    Text(page.name).font(.title2.bold()).multilineTextAlignment(.center)
+                    if let listeners = page.monthlyListeners {
+                        Text("\(listeners.formatted()) oyentes mensuales")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 12) {
+                        Button {
+                            playAll()
+                        } label: {
+                            Label("Reproducir", systemImage: "play.fill").frame(maxWidth: .infinity)
+                        }
+                        Button {
+                            store.save(.artist, id: id, from: slug)
+                        } label: {
+                            Label("Seguir", systemImage: "plus").frame(maxWidth: .infinity)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .frame(maxWidth: .infinity)
+                .listRowSeparator(.hidden)
+
+                if !page.topTracks.isEmpty {
+                    Section("Populares") {
+                        TrackList(tracks: Array(page.topTracks.prefix(10)), slug: slug)
+                    }
+                }
+                AlbumShelf(title: "Álbumes", albums: page.albums, slug: slug)
+                AlbumShelf(title: "Sencillos y EP", albums: page.singles, slug: slug)
+                AlbumShelf(title: "Aparece en", albums: page.appearsOn, slug: slug)
+                if let text = page.biography, !text.isEmpty {
+                    Section("Biografía") {
+                        Text(text)
+                            .font(.callout)
+                            .lineLimit(biography ? nil : 4)
+                            .onTapGesture { biography.toggle() }
+                    }
+                }
+            }
+            .listStyle(.plain)
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .withPlayerBar()
+    }
+
+    private func playAll() {
+        let slug = self.slug
+        let id = self.id
+        Task {
+            switch await store.run({ try $0.artistTracks(slug: slug, id: id) }) {
+            case .success(let tracks) where !tracks.isEmpty:
+                store.play(tracks, at: 0, from: slug)
+            case .success:
+                store.problem = "Este artista no tiene canciones para reproducir."
+            case .failure(let error):
+                store.problem = describe(error)
+            }
+        }
+    }
+}
+
+// MARK: - Cola
+
+struct QueueView: View {
+    @EnvironmentObject private var store: Store
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let queue = store.engine.queue()
+        let current = Int(store.state.index)
+        NavigationStack {
+            List {
+                ForEach(Array(queue.enumerated()), id: \.offset) { index, track in
+                    Button {
+                        store.engine.jump(index: UInt32(index))
+                    } label: {
+                        TrackRow(track: track, current: index == current)
+                    }
+                    .buttonStyle(.plain)
+                    .opacity(index < current ? 0.5 : 1)
+                    .deleteDisabled(index == current)
+                }
+                .onDelete { offsets in
+                    for index in offsets.sorted(by: >) {
+                        store.engine.removeFromQueue(index: UInt32(index))
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .navigationTitle("Cola")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Listo") { dismiss() }
+                }
+            }
+        }
+    }
+}

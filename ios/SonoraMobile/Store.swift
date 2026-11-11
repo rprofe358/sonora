@@ -151,6 +151,44 @@ final class Store: ObservableObject {
         }
     }
 
+    /// Corre algo que bloquea al motor fuera del hilo principal.
+    func run<T>(_ work: @escaping (Engine) throws -> T) async -> Result<T, Error> {
+        let engine = self.engine
+        return await Task.detached { Result(catching: { try work(engine) }) }.value
+    }
+
+    func enqueue(_ tracks: [TrackItem], next: Bool, from slug: String) {
+        Task {
+            if case .failure(let error) = await run({ try $0.enqueue(slug: slug, tracks: tracks, next: next) }) {
+                problem = describe(error)
+            }
+        }
+    }
+
+    func startRadio(_ track: TrackItem, from slug: String) {
+        Task {
+            switch await run({ try $0.radio(slug: slug, trackId: track.id) }) {
+            case .success(let tracks):
+                var queue = tracks
+                if !queue.contains(where: { $0.id == track.id }) { queue.insert(track, at: 0) }
+                play(queue, at: 0, from: slug)
+            case .failure(let error):
+                problem = describe(error)
+            }
+        }
+    }
+
+    func save(_ kind: SavedKind, id: String, from slug: String, saved: Bool = true) {
+        Task {
+            switch await run({ try $0.setSaved(slug: slug, kind: kind, id: id, saved: saved) }) {
+            case .success:
+                problem = saved ? "Guardado en tu biblioteca." : "Quitado de tu biblioteca."
+            case .failure(let error):
+                problem = describe(error)
+            }
+        }
+    }
+
     func prompted(slug: String, prompt: Prompt) {
         self.prompt = PendingPrompt(slug: slug, prompt: prompt)
     }

@@ -17,8 +17,12 @@ struct ContentView: View {
 
     var body: some View {
         TabView {
+            HomeView()
+                .tabItem { Label("Inicio", systemImage: "house") }
             SearchView()
                 .tabItem { Label("Buscar", systemImage: "magnifyingglass") }
+            LibraryView()
+                .tabItem { Label("Biblioteca", systemImage: "books.vertical") }
             AccountsView()
                 .tabItem { Label("Cuentas", systemImage: "person.crop.circle") }
         }

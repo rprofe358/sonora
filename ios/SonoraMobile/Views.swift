@@ -7,38 +7,53 @@ extension TrackItem: Identifiable {}
 struct SearchView: View {
     @EnvironmentObject private var store: Store
     @State private var query = ""
-    @State private var results: [TrackItem] = []
+    @State private var results: SearchResults?
     @State private var searchedIn = ""
     @State private var searching = false
 
     var body: some View {
-        NavigationStack {
+        RoutedStack {
             List {
                 if store.signedIn.isEmpty {
-                    Section {
-                        Text("Primero entra en la pestaña **Cuentas** y elige YouTube Music (se puede sin cuenta) o Spotify.")
-                            .foregroundStyle(.secondary)
-                    }
-                } else if store.signedIn.count > 1 {
-                    Picker("Servicio", selection: $store.selected) {
-                        ForEach(store.signedIn, id: \.slug) { provider in
-                            Text(provider.name).tag(provider.slug)
+                    NeedsAccount()
+                } else {
+                    ProviderPicker().listRowBackground(Color.clear)
+                }
+                if let results {
+                    if !results.artists.isEmpty {
+                        Section("Artistas") {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(alignment: .top, spacing: 12) {
+                                    ForEach(results.artists, id: \.id) { artist in
+                                        MediaCard(item: .artist(artist: artist), slug: searchedIn) {}
+                                    }
+                                }
+                            }
                         }
                     }
-                    .pickerStyle(.segmented)
-                    .listRowBackground(Color.clear)
-                }
-                ForEach(Array(results.enumerated()), id: \.offset) { index, track in
-                    Button {
-                        store.play(results, at: index, from: searchedIn)
-                    } label: {
-                        TrackRow(
-                            track: track,
-                            current: store.state.provider == searchedIn && store.state.track?.id == track.id
-                        )
+                    if !results.tracks.isEmpty {
+                        Section("Canciones") {
+                            TrackList(tracks: results.tracks, slug: searchedIn)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!track.playable)
+                    if !results.albums.isEmpty {
+                        Section("Álbumes") {
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(alignment: .top, spacing: 12) {
+                                    ForEach(results.albums, id: \.id) { album in
+                                        MediaCard(item: .album(album: album), slug: searchedIn) {}
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !results.playlists.isEmpty {
+                        Section("Playlists") {
+                            ForEach(results.playlists, id: \.id) { playlist in
+                                PlaylistRow(playlist: playlist, slug: searchedIn)
+                            }
+                        }
+                    }
                 }
             }
             .listStyle(.plain)
@@ -58,9 +73,42 @@ struct SearchView: View {
         let slug = store.selected
         searching = true
         Task {
-            results = await store.search(text, in: slug)
-            searchedIn = slug
+            let found = await store.run { try $0.searchAll(slug: slug, query: text) }
+            switch found {
+            case .success(let value):
+                results = value
+                searchedIn = slug
+            case .failure(let error):
+                store.problem = describe(error)
+            }
             searching = false
+        }
+    }
+}
+
+/// Una lista de canciones que se reproduce desde la que se toque.
+struct TrackList: View {
+    @EnvironmentObject private var store: Store
+    let tracks: [TrackItem]
+    let slug: String
+    var numbered = false
+    var covers = true
+
+    var body: some View {
+        ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
+            Button {
+                store.play(tracks, at: index, from: slug)
+            } label: {
+                TrackRow(
+                    track: track,
+                    current: store.state.provider == slug && store.state.track?.id == track.id,
+                    number: numbered ? index + 1 : nil,
+                    cover: covers
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(!track.playable)
+            .trackMenu(track, slug: slug)
         }
     }
 }
@@ -68,10 +116,20 @@ struct SearchView: View {
 struct TrackRow: View {
     let track: TrackItem
     let current: Bool
+    var number: Int? = nil
+    var cover = true
 
     var body: some View {
         HStack(spacing: 12) {
-            Cover(url: track.cover, size: 48)
+            if let number {
+                Text("\(number)")
+                    .font(.callout.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .frame(minWidth: 24)
+            }
+            if cover {
+                Cover(url: track.cover, size: 48)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Text(track.title)
@@ -102,6 +160,7 @@ struct TrackRow: View {
 struct Cover: View {
     let url: String?
     let size: CGFloat
+    var round = false
 
     var body: some View {
         AsyncImage(url: url.flatMap(URL.init(string:))) { image in
@@ -109,11 +168,11 @@ struct Cover: View {
         } placeholder: {
             ZStack {
                 Color.secondary.opacity(0.15)
-                Image(systemName: "music.note").foregroundStyle(.secondary)
+                Image(systemName: round ? "music.mic" : "music.note").foregroundStyle(.secondary)
             }
         }
         .frame(width: size, height: size)
-        .clipShape(RoundedRectangle(cornerRadius: size * 0.12))
+        .clipShape(RoundedRectangle(cornerRadius: round ? size / 2 : size * 0.08))
     }
 }
 
@@ -272,6 +331,7 @@ struct PlayerView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var scrub: Double?
     @State private var volume: Double = 1
+    @State private var showQueue = false
 
     var body: some View {
         let state = store.state
@@ -334,12 +394,21 @@ struct PlayerView: View {
             }
             .padding(.horizontal, 24)
 
-            Text("Canción \(state.index + 1) de \(state.queueLength) · \(providerName(state.provider))")
+            Button {
+                showQueue = true
+            } label: {
+                Label(
+                    "Canción \(state.index + 1) de \(state.queueLength) · \(providerName(state.provider))",
+                    systemImage: "list.bullet"
+                )
                 .font(.footnote)
-                .foregroundStyle(.secondary)
+            }
             Spacer(minLength: 0)
         }
         .onAppear { volume = Double(state.volume) }
+        .sheet(isPresented: $showQueue) {
+            QueueView().environmentObject(store)
+        }
     }
 
     private func providerName(_ slug: String?) -> String {

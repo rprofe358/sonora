@@ -4,7 +4,7 @@ name: iOS
 # Se firma al instalarla con Sideloadly/AltStore desde Windows.
 on:
   push:
-    branches: [ios]
+    branches: [ios, "fase-*"]
   workflow_dispatch:
 
 concurrency:

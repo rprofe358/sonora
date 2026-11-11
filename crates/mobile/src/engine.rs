@@ -18,6 +18,10 @@ use tokio::task::JoinHandle;
 
 use crate::{MobileError, failed, runtime};
 
+mod library;
+
+pub use library::*;
+
 /// Cada cuánto informa el motor de la posición.
 const POSITION_INTERVAL: Duration = Duration::from_millis(500);
 /// Pasados estos segundos, "anterior" vuelve al principio de la canción en vez de retroceder.
@@ -93,6 +97,9 @@ pub struct TrackItem {
     pub title: String,
     pub artists: String,
     pub album: String,
+    pub album_id: Option<String>,
+    /// El primer artista, para abrir su página.
+    pub artist_id: Option<String>,
     pub cover: Option<String>,
     pub duration_ms: u64,
     pub explicit: bool,
@@ -389,6 +396,67 @@ impl Engine {
 
     pub fn state(&self) -> PlaybackState {
         self.inner.state()
+    }
+
+    /// La cola completa, para mostrarla.
+    pub fn queue(&self) -> Vec<TrackItem> {
+        lock(&self.inner.queue).tracks.clone()
+    }
+
+    /// Agrega canciones a la cola: justo después de la actual (`next`) o al final. Si no suena
+    /// nada, o suena otro servicio, empieza a reproducirlas.
+    pub fn enqueue(
+        &self,
+        slug: String,
+        tracks: Vec<TrackItem>,
+        next: bool,
+    ) -> Result<(), MobileError> {
+        if tracks.is_empty() {
+            return Ok(());
+        }
+        let same = {
+            let queue = lock(&self.inner.queue);
+            queue.slug.as_deref() == Some(slug.as_str()) && !queue.tracks.is_empty()
+        };
+        if !same {
+            return self.play_queue(slug, tracks, 0);
+        }
+        let mut queue = lock(&self.inner.queue);
+        let at = match next {
+            true => (queue.index + 1).min(queue.tracks.len()),
+            false => queue.tracks.len(),
+        };
+        queue.tracks.splice(at..at, tracks);
+        queue.preloaded = false;
+        drop(queue);
+        self.inner.notify();
+        Ok(())
+    }
+
+    /// Salta a otra canción de la cola.
+    pub fn jump(&self, index: u32) {
+        let Some(player) = self.inner.player() else {
+            return;
+        };
+        if (index as usize) < lock(&self.inner.queue).tracks.len() {
+            self.inner.load(&player, index as usize, false);
+        }
+    }
+
+    /// Quita una canción de la cola (no la que suena).
+    pub fn remove_from_queue(&self, index: u32) {
+        let mut queue = lock(&self.inner.queue);
+        let index = index as usize;
+        if index >= queue.tracks.len() || index == queue.index {
+            return;
+        }
+        queue.tracks.remove(index);
+        if index < queue.index {
+            queue.index -= 1;
+        }
+        queue.preloaded = false;
+        drop(queue);
+        self.inner.notify();
     }
 }
 
@@ -742,6 +810,11 @@ fn item(track: &Track) -> Option<TrackItem> {
         title: track.name.clone(),
         artists: track.artists.clone(),
         album: track.album.clone(),
+        album_id: track.album_id.clone(),
+        artist_id: track
+            .artist_refs
+            .iter()
+            .find_map(|artist| artist.id.clone()),
         cover: track.cover.clone(),
         duration_ms: track.duration.as_millis() as u64,
         explicit: track.explicit,
