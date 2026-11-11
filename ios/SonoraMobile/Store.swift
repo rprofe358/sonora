@@ -32,6 +32,7 @@ final class Store: ObservableObject {
     let engine: Engine
     private let bridge: Bridge
     private let nowPlaying = NowPlaying()
+    private let minter = PoTokenMinter()
 
     @Published var providers: [ProviderInfo] = []
     @Published var state: PlaybackState
@@ -48,6 +49,7 @@ final class Store: ObservableObject {
         state = engine.state()
         bridge.store = self
         nowPlaying.attach(engine: engine)
+        minter.start()
         refresh()
         restoreStored()
     }

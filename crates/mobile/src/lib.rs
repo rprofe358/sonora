@@ -15,8 +15,10 @@ use music::youtube::YouTubeProvider;
 use music::{Lyrics, LyricsProvider, LyricsQuery, MusicProvider};
 
 mod engine;
+mod potoken;
 
 pub use engine::*;
+pub use potoken::*;
 
 uniffi::setup_scaffolding!();
 
