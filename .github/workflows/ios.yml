@@ -32,9 +32,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: ios
+          # Guarda lo compilado aunque falle, para no recompilar 400 crates en cada intento.
+          cache-on-failure: true
 
       - name: Motor en Rust para iPhone
-        run: cargo build -p sonora_mobile --target aarch64-apple-ios --release
+        run: cargo build -p sonora_mobile --target aarch64-apple-ios --release --keep-going
 
       - name: Bindings de Swift (UniFFI)
         run: |
