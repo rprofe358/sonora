@@ -99,7 +99,9 @@ pub fn lyrics(title: String, artist: String) -> Result<Vec<String>, MobileError>
         duration: Duration::ZERO,
         track: None,
     };
-    let hits = runtime.block_on(async { LrcLib::new().search(&query).await }).map_err(failed)?;
+    let hits = runtime
+        .block_on(async { LrcLib::new().search(&query).await })
+        .map_err(failed)?;
     let Some(hit) = hits.into_iter().next() else {
         return Ok(Vec::new());
     };
