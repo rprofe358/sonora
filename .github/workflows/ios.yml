@@ -36,7 +36,10 @@ jobs:
           cache-on-failure: true
 
       - name: Motor en Rust para iPhone
-        run: cargo build -p sonora_mobile --target aarch64-apple-ios --release --keep-going
+        run: |
+          # bindgen (para rquickjs) necesita el SDK de iOS para leer las cabeceras de C.
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_apple_ios="--sysroot=$(xcrun --sdk iphoneos --show-sdk-path)"
+          cargo build -p sonora_mobile --target aarch64-apple-ios --release --keep-going
 
       - name: Bindings de Swift (UniFFI)
         run: |

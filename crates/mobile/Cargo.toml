@@ -17,3 +17,7 @@ music.workspace = true
 rustls.workspace = true
 tokio.workspace = true
 uniffi = "0.29"
+
+# rquickjs (lo usa ytmusic) no trae bindings precompilados para iOS: se generan al compilar.
+[target.'cfg(target_os = "ios")'.dependencies]
+rquickjs = { version = "0.12", default-features = false, features = ["bindgen"] }
