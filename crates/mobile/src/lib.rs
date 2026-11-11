@@ -14,6 +14,10 @@ use music::spotify::SpotifyProvider;
 use music::youtube::YouTubeProvider;
 use music::{Lyrics, LyricsProvider, LyricsQuery, MusicProvider};
 
+mod engine;
+
+pub use engine::*;
+
 uniffi::setup_scaffolding!();
 
 static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
