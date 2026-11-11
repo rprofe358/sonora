@@ -1,0 +1,71 @@
+name: iOS
+
+# Compila el motor de Sonora para iPhone y empaqueta una app de prueba sin firmar (.ipa).
+# Se firma al instalarla con Sideloadly/AltStore desde Windows.
+on:
+  push:
+    branches: [ios]
+  workflow_dispatch:
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 150
+    env:
+      IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+      # Más rápido que el perfil de lanzamiento de escritorio (thin LTO, 1 codegen unit).
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain de Rust
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add aarch64-apple-ios
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ios
+
+      - name: Motor en Rust para iPhone
+        run: cargo build -p sonora_mobile --target aarch64-apple-ios --release
+
+      - name: Bindings de Swift (UniFFI)
+        run: |
+          cargo run -p uniffi-bindgen -- generate \
+            --library target/aarch64-apple-ios/release/libsonora_mobile.a \
+            --language swift --out-dir ios/Generated
+          ls -la ios/Generated
+
+      - name: Proyecto de Xcode
+        run: |
+          brew install xcodegen
+          cd ios && xcodegen generate
+
+      - name: App de iPhone
+        run: |
+          cd ios
+          xcodebuild -project SonoraMobile.xcodeproj -scheme SonoraMobile \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Empaquetar .ipa
+        run: |
+          mkdir -p Payload
+          cp -R ios/build/Build/Products/Release-iphoneos/SonoraMobile.app Payload/
+          zip -qry SonoraMobile.ipa Payload
+          ls -lh SonoraMobile.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SonoraMobile-ipa
+          path: SonoraMobile.ipa
+          retention-days: 30

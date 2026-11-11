@@ -1,0 +1,19 @@
+[package]
+name = "sonora_mobile"
+description = "Puente entre el motor de Sonora (crate `music`) y la app de iPhone, expuesto con UniFFI."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "sonora_mobile"
+# staticlib: lo que enlaza la app de iOS. lib: para poder usarlo desde otros crates y tests.
+crate-type = ["staticlib", "lib"]
+
+[dependencies]
+anyhow.workspace = true
+music.workspace = true
+rustls.workspace = true
+tokio.workspace = true
+uniffi = "0.29"

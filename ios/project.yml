@@ -1,0 +1,46 @@
+# Proyecto de Xcode descrito como texto. XcodeGen lo convierte en SonoraMobile.xcodeproj en
+# GitHub Actions, así que no hace falta una Mac para mantenerlo.
+name: SonoraMobile
+options:
+  bundleIdPrefix: com.rprofe358
+  deploymentTarget:
+    iOS: "16.0"
+targets:
+  SonoraMobile:
+    type: application
+    platform: iOS
+    sources:
+      - path: SonoraMobile
+      # Los generan UniFFI a partir del crate `mobile`; no se editan a mano.
+      - path: Generated
+        excludes:
+          - "*.modulemap"
+    scheme: {}
+    info:
+      path: SonoraMobile/Info.plist
+      properties:
+        CFBundleDisplayName: Sonora
+        UILaunchScreen: {}
+        UIBackgroundModes: [audio]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.rprofe358.sonoramobile
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_OBJC_BRIDGING_HEADER: Generated/sonora_mobileFFI.h
+        LIBRARY_SEARCH_PATHS: $(PROJECT_DIR)/../target/aarch64-apple-ios/release
+        OTHER_LDFLAGS: -lsonora_mobile -lc++ -lsqlite3 -lresolv -lz
+        DEAD_CODE_STRIPPING: YES
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+    dependencies:
+      - sdk: Security.framework
+      - sdk: SystemConfiguration.framework
+      - sdk: CoreFoundation.framework
+      - sdk: CoreAudio.framework
+      - sdk: AudioToolbox.framework
+      - sdk: AVFoundation.framework
+      - sdk: CoreMedia.framework
