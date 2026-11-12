@@ -341,7 +341,10 @@ struct PlayerBar: View {
                 Cover(url: track.cover, size: 40)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(track.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                    Text(track.artists).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(state.remote ? "En la sesión · \(track.artists)" : track.artists)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 Button { store.engine.previous() } label: {
@@ -450,14 +453,21 @@ struct PlayerView: View {
             }
             .buttonStyle(.plain)
 
-            HStack {
-                Image(systemName: "speaker.fill").foregroundStyle(.secondary)
-                Slider(value: $volume, in: 0...1) { editing in
-                    if !editing { store.engine.setVolume(level: Float(volume)) }
+            if state.remote {
+                Label("Controlas la sesión: esto suena en los otros dispositivos.", systemImage: "slider.horizontal.3")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 24)
+            } else {
+                HStack {
+                    Image(systemName: "speaker.fill").foregroundStyle(.secondary)
+                    Slider(value: $volume, in: 0...1) { editing in
+                        if !editing { store.engine.setVolume(level: Float(volume)) }
+                    }
+                    Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
                 }
-                Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
+                .padding(.horizontal, 24)
             }
-            .padding(.horizontal, 24)
 
             HStack(spacing: 28) {
                 Button {

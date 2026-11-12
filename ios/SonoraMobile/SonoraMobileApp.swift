@@ -23,6 +23,8 @@ struct ContentView: View {
                 .tabItem { Label("Buscar", systemImage: "magnifyingglass") }
             LibraryView()
                 .tabItem { Label("Biblioteca", systemImage: "books.vertical") }
+            SessionView()
+                .tabItem { Label("Sesión", systemImage: "person.2.wave.2") }
             AccountsView()
                 .tabItem { Label("Cuentas", systemImage: "person.crop.circle") }
         }

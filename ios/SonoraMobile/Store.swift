@@ -21,7 +21,14 @@ final class Bridge: EngineListener, @unchecked Sendable {
     }
 
     func onProblem(message: String) {
-        Task { @MainActor [weak self] in self?.store?.problem = message }
+        Task { @MainActor [weak self] in
+            self?.store?.problem = message
+            self?.store?.sessionBusy = false
+        }
+    }
+
+    func onSession(session: SessionInfo?) {
+        Task { @MainActor [weak self] in self?.store?.sessionChanged(session) }
     }
 }
 
@@ -39,6 +46,10 @@ final class Store: ObservableObject {
     @Published var prompt: PendingPrompt?
     @Published var problem: String?
     @Published var signingIn: String?
+    /// La Sonora Session en la que está la app.
+    @Published var session: SessionInfo?
+    /// Se está creando o uniendo a una sesión.
+    @Published var sessionBusy = false
     /// El proveedor en el que se busca.
     @Published var selected: String = "youtube"
 
@@ -187,6 +198,32 @@ final class Store: ObservableObject {
                 problem = describe(error)
             }
         }
+    }
+
+    func startSession() {
+        sessionBusy = true
+        let slug = selected
+        Task {
+            if case .failure(let error) = await run({ try $0.sessionStart(slug: slug) }) {
+                problem = describe(error)
+                sessionBusy = false
+            }
+        }
+    }
+
+    func joinSession(_ code: String, remote: Bool) {
+        sessionBusy = true
+        Task {
+            if case .failure(let error) = await run({ try $0.sessionJoin(code: code, remote: remote) }) {
+                problem = describe(error)
+                sessionBusy = false
+            }
+        }
+    }
+
+    func sessionChanged(_ info: SessionInfo?) {
+        session = info
+        if info != nil { sessionBusy = false }
     }
 
     func prompted(slug: String, prompt: Prompt) {

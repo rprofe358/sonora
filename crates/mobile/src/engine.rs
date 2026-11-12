@@ -3,8 +3,8 @@
 //! [`EngineListener`], desde un hilo de tokio, así que Swift debe pasarlo al hilo principal.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use music::equalizer::{Curve, EqualizerWriter};
 use music::spotify::SpotifyProvider;
@@ -20,9 +20,11 @@ use crate::{MobileError, failed, runtime};
 
 mod library;
 mod lyrics;
+mod session;
 
 pub use library::*;
 pub use lyrics::*;
+pub use session::*;
 
 /// Cada cuánto informa el motor de la posición.
 const POSITION_INTERVAL: Duration = Duration::from_millis(500);
@@ -128,6 +130,8 @@ pub struct PlaybackState {
     pub position_ms: u64,
     pub duration_ms: u64,
     pub volume: f32,
+    /// Este iPhone controla una sesión sin sonar: lo que se ve es lo que suena en la sesión.
+    pub remote: bool,
 }
 
 /// Lo que Swift implementa para enterarse de lo que pasa en el motor.
@@ -137,6 +141,8 @@ pub trait EngineListener: Send + Sync {
     fn on_state(&self, state: PlaybackState);
     /// Un problema que no detiene la app, para mostrarlo como aviso.
     fn on_problem(&self, message: String);
+    /// La Sonora Session en la que está la app cambió, o se acabó (`None`).
+    fn on_session(&self, session: Option<SessionInfo>);
 }
 
 /// El motor de Sonora para el teléfono.
@@ -181,6 +187,7 @@ impl Engine {
                 equalizer: Mutex::new(writer),
                 config: Mutex::new(config),
                 lyrics: lyrics::providers(),
+                listening: Mutex::default(),
             }),
         })
     }
@@ -319,6 +326,9 @@ impl Engine {
         tracks: Vec<TrackItem>,
         index: u32,
     ) -> Result<(), MobileError> {
+        if self.inner.remote() {
+            return self.inner.remote_play(&slug, &tracks, index as usize);
+        }
         let index = index as usize;
         if index >= tracks.len() {
             return Err(MobileError::Failed {
@@ -336,18 +346,33 @@ impl Engine {
     }
 
     pub fn play(&self) {
+        if self.inner.remote() {
+            return self.inner.remote_change(|state| state.playing = true);
+        }
         if let Some(player) = self.inner.player() {
+            lock(&self.inner.now).wants = true;
             player.play();
+            self.inner.notify();
         }
     }
 
     pub fn pause(&self) {
+        if self.inner.remote() {
+            return self.inner.remote_change(|state| state.playing = false);
+        }
         if let Some(player) = self.inner.player() {
+            lock(&self.inner.now).wants = false;
             player.pause();
+            self.inner.notify();
         }
     }
 
     pub fn toggle(&self) {
+        if self.inner.remote() {
+            return self
+                .inner
+                .remote_change(|state| state.playing = !state.playing);
+        }
         let status = lock(&self.inner.now).status;
         match status {
             Status::Playing | Status::Loading => self.pause(),
@@ -361,26 +386,53 @@ impl Engine {
     }
 
     pub fn next(&self) {
+        if self.inner.remote() {
+            return self.inner.remote_change(|state| {
+                if !state.upcoming.is_empty() {
+                    state.track = Some(state.upcoming.remove(0));
+                    state.position = 0;
+                    state.playing = true;
+                }
+            });
+        }
         self.inner.advance(false);
     }
 
     pub fn previous(&self) {
+        if self.inner.remote() {
+            return self.inner.remote_change(|state| state.position = 0);
+        }
         let Some(player) = self.inner.player() else {
             return;
         };
         let position = lock(&self.inner.now).position;
         let index = lock(&self.inner.queue).index;
         if position > RESTART_AFTER || index == 0 {
+            {
+                let mut now = lock(&self.inner.now);
+                now.place(Duration::ZERO);
+                now.seeks += 1;
+            }
             player.seek(Duration::ZERO);
+            self.inner.notify();
         } else {
             self.inner.load(&player, index - 1, false);
         }
     }
 
     pub fn seek(&self, position_ms: u64) {
+        if self.inner.remote() {
+            return self
+                .inner
+                .remote_change(|state| state.position = position_ms);
+        }
         if let Some(player) = self.inner.player() {
             let position = Duration::from_millis(position_ms);
-            lock(&self.inner.now).position = position;
+            {
+                let mut now = lock(&self.inner.now);
+                now.place(position);
+                now.seeks += 1;
+            }
             player.seek(position);
         }
         self.inner.notify();
@@ -403,6 +455,9 @@ impl Engine {
 
     /// La cola completa, para mostrarla.
     pub fn queue(&self) -> Vec<TrackItem> {
+        if let Some(queue) = self.inner.remote_queue() {
+            return queue;
+        }
         lock(&self.inner.queue).tracks.clone()
     }
 
@@ -415,6 +470,17 @@ impl Engine {
         next: bool,
     ) -> Result<(), MobileError> {
         if tracks.is_empty() {
+            return Ok(());
+        }
+        if self.inner.remote() {
+            let added: Vec<Track> = tracks.iter().map(full).collect();
+            self.inner.remote_change(move |state| {
+                let at = match next {
+                    true => 0,
+                    false => state.upcoming.len(),
+                };
+                state.upcoming.splice(at..at, added);
+            });
             return Ok(());
         }
         let same = {
@@ -438,6 +504,18 @@ impl Engine {
 
     /// Salta a otra canción de la cola.
     pub fn jump(&self, index: u32) {
+        if self.inner.remote() {
+            let index = index as usize;
+            return self.inner.remote_change(move |state| {
+                if index >= 1 && index <= state.upcoming.len() {
+                    let mut rest = state.upcoming.split_off(index - 1);
+                    state.track = Some(rest.remove(0));
+                    state.upcoming = rest;
+                    state.position = 0;
+                    state.playing = true;
+                }
+            });
+        }
         let Some(player) = self.inner.player() else {
             return;
         };
@@ -448,6 +526,14 @@ impl Engine {
 
     /// Quita una canción de la cola (no la que suena).
     pub fn remove_from_queue(&self, index: u32) {
+        if self.inner.remote() {
+            let index = index as usize;
+            return self.inner.remote_change(move |state| {
+                if index >= 1 && index <= state.upcoming.len() {
+                    state.upcoming.remove(index - 1);
+                }
+            });
+        }
         let mut queue = lock(&self.inner.queue);
         let index = index as usize;
         if index >= queue.tracks.len() || index == queue.index {
@@ -494,7 +580,15 @@ struct Queue {
 struct Now {
     status: Status,
     position: Duration,
+    /// Cuándo se supo `position`, para calcular dónde va mientras suena.
+    at: Instant,
     duration: Duration,
+    /// Si el usuario quiere que suene (aunque esté cargando).
+    wants: bool,
+    /// Cuántas veces el usuario movió la posición, y cuántas canciones terminaron solas. Las
+    /// sesiones los comparan para saber qué cambió aquí.
+    seeks: u64,
+    ends: u64,
 }
 
 impl Default for Now {
@@ -502,7 +596,32 @@ impl Default for Now {
         Self {
             status: Status::Idle,
             position: Duration::ZERO,
+            at: Instant::now(),
             duration: Duration::ZERO,
+            wants: false,
+            seeks: 0,
+            ends: 0,
+        }
+    }
+}
+
+impl Now {
+    fn place(&mut self, position: Duration) {
+        self.position = position;
+        self.at = Instant::now();
+    }
+
+    /// Dónde va la canción ahora mismo.
+    fn live(&self) -> Duration {
+        match self.status {
+            Status::Playing => {
+                let moved = self.position + self.at.elapsed();
+                match self.duration.is_zero() {
+                    true => moved,
+                    false => moved.min(self.duration),
+                }
+            }
+            _ => self.position,
         }
     }
 }
@@ -522,6 +641,7 @@ struct Inner {
     equalizer: Mutex<EqualizerWriter>,
     config: Mutex<PlaybackConfig>,
     lyrics: Vec<Arc<dyn music::LyricsProvider>>,
+    listening: Mutex<session::Listening>,
 }
 
 impl Inner {
@@ -636,30 +756,31 @@ impl Inner {
             PlaybackEvent::Loading { id, at } if self.is_current(&id) => {
                 let mut now = lock(&self.now);
                 now.status = Status::Loading;
-                now.position = at;
+                now.place(at);
             }
             PlaybackEvent::Playing { id, at } if self.is_current(&id) => {
                 {
                     let mut now = lock(&self.now);
                     now.status = Status::Playing;
-                    now.position = at;
+                    now.place(at);
                 }
                 self.preload_next();
             }
             PlaybackEvent::Paused { id, at } if self.is_current(&id) => {
                 let mut now = lock(&self.now);
                 now.status = Status::Paused;
-                now.position = at;
+                now.place(at);
             }
             PlaybackEvent::Position { id, at } | PlaybackEvent::Seeked { id, at }
                 if self.is_current(&id) =>
             {
-                lock(&self.now).position = at;
+                lock(&self.now).place(at);
             }
             PlaybackEvent::Length { id, duration } if self.is_current(&id) => {
                 lock(&self.now).duration = duration;
             }
             PlaybackEvent::Ended { id } if self.is_current(&id) => {
+                lock(&self.now).ends += 1;
                 self.advance(true);
                 return;
             }
@@ -731,7 +852,9 @@ impl Inner {
         } else {
             let mut now = lock(&self.now);
             now.status = Status::Ended;
-            now.position = now.duration;
+            let end = now.duration;
+            now.place(end);
+            now.wants = false;
             drop(now);
             self.notify();
         }
@@ -750,7 +873,8 @@ impl Inner {
         {
             let mut now = lock(&self.now);
             now.status = Status::Loading;
-            now.position = Duration::ZERO;
+            now.place(Duration::ZERO);
+            now.wants = true;
             now.duration = Duration::from_millis(track.duration_ms);
         }
         self.notify();
@@ -782,12 +906,15 @@ impl Inner {
         {
             let mut now = lock(&self.now);
             now.status = Status::Paused;
-            now.position = at;
+            now.place(at);
         }
         self.notify();
     }
 
     fn state(&self) -> PlaybackState {
+        if let Some(remote) = self.remote_state() {
+            return remote;
+        }
         let queue = lock(&self.queue);
         let now = lock(&self.now);
         PlaybackState {
@@ -796,19 +923,35 @@ impl Inner {
             track: queue.tracks.get(queue.index).cloned(),
             index: queue.index as u32,
             queue_length: queue.tracks.len() as u32,
-            position_ms: now.position.as_millis() as u64,
+            position_ms: now.live().as_millis() as u64,
             duration_ms: now.duration.as_millis() as u64,
             volume: *lock(&self.level),
+            remote: false,
         }
     }
 
     fn notify(&self) {
         self.listener.on_state(self.state());
+        self.publish();
     }
 }
 
+/// Las canciones completas que la app ya vio, por id, para compartirlas en una sesión tal como
+/// las da el servicio.
+static KNOWN: LazyLock<Mutex<HashMap<String, Track>>> = LazyLock::new(Mutex::default);
+/// Cuántas se recuerdan antes de empezar de nuevo.
+const KNOWN_LIMIT: usize = 5000;
+
 /// Convierte una canción del motor en una para la app. Las que no tienen id no se pueden poner.
 fn item(track: &Track) -> Option<TrackItem> {
+    let id = track.id.clone()?;
+    {
+        let mut known = lock(&KNOWN);
+        if known.len() > KNOWN_LIMIT {
+            known.clear();
+        }
+        known.insert(id, track.clone());
+    }
     Some(TrackItem {
         id: track.id.clone()?,
         title: track.name.clone(),
@@ -824,6 +967,34 @@ fn item(track: &Track) -> Option<TrackItem> {
         explicit: track.explicit,
         playable: track.playable,
     })
+}
+
+/// La canción completa detrás de una de la app: la que dio el servicio, o una armada con lo que
+/// la app sabe de ella.
+fn full(item: &TrackItem) -> Track {
+    if let Some(track) = lock(&KNOWN).get(&item.id) {
+        return track.clone();
+    }
+    Track {
+        id: Some(item.id.clone()),
+        name: item.title.clone(),
+        playable: item.playable,
+        artists: item.artists.clone(),
+        artist_refs: item
+            .artist_id
+            .iter()
+            .map(|id| music::ArtistRef {
+                name: item.artists.clone(),
+                id: Some(id.clone()),
+            })
+            .collect(),
+        album: item.album.clone(),
+        album_id: item.album_id.clone(),
+        cover: item.cover.clone(),
+        duration: Duration::from_millis(item.duration_ms),
+        explicit: item.explicit,
+        ..Default::default()
+    }
 }
 
 /// La ganancia lineal de un nivel de volumen, con la misma curva que la app de escritorio.
