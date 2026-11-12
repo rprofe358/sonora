@@ -63,15 +63,7 @@ struct SyncedLyrics: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         Color.clear.frame(height: geometry.size.height * 0.3)
-                        ForEach(Array(result.lines.enumerated()), id: \.offset) { index, line in
-                            LyricLine(
-                                text: line.text,
-                                current: index == active,
-                                distance: active.map { abs(index - $0) } ?? 99
-                            )
-                            .id(index)
-                            .onTapGesture { store.engine.seek(positionMs: line.startMs) }
-                        }
+                        lines(active: active)
                         Text("Letra: \(result.source)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -93,6 +85,15 @@ struct SyncedLyrics: View {
         }
     }
 
+    private func lines(active: Int?) -> some View {
+        ForEach(Array(result.lines.enumerated()), id: \.offset) { index, line in
+            let distance: Int = active.map { abs(index - $0) } ?? 99
+            LyricRow(text: line.text, current: index == active, distance: distance)
+                .id(index)
+                .onTapGesture { store.engine.seek(positionMs: line.startMs) }
+        }
+    }
+
     private func activeLine(at position: UInt64) -> Int? {
         result.lines.lastIndex(where: { $0.startMs <= position })
     }
@@ -100,7 +101,7 @@ struct SyncedLyrics: View {
 
 /// Una línea de la letra. Todas ocupan el espacio de la línea grande y las demás se encogen con
 /// una escala, así el texto no cambia de tamaño ni empuja a las otras al pasar de una a otra.
-private struct LyricLine: View {
+private struct LyricRow: View {
     let text: String
     let current: Bool
     let distance: Int
