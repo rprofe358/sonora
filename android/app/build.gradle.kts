@@ -57,4 +57,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     // UniFFI llama al motor en Rust a través de JNA.
     implementation("net.java.dev.jna:jna:5.15.0@aar")
+    // Debe coincidir con rustls-platform-verifier-android en Cargo.lock (0.2.0).
+    implementation("org.rustls:rustls-platform-verifier:0.2.0")
 }

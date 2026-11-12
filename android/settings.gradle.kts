@@ -11,6 +11,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // El componente Java de rustls-platform-verifier (lo pide el verificador de certificados).
+        maven { url = uri("${rootDir}/maven") }
     }
 }
 

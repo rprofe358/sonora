@@ -34,7 +34,9 @@ webpki-root-certs = "1"
 
 # Android: cpal necesita el contexto de la app (JavaVM + Context) para hablar con AAudio.
 [target.'cfg(target_os = "android")'.dependencies]
-jni = "0.21"
+jni = "0.22"
 ndk-context = "0.1"
+# reqwest verifica los certificados con el de Android; hay que darle el contexto de la app.
+rustls-platform-verifier = "0.7"
 # Android no deja enlazar con su SQLite: se compila el de la librería.
 music = { workspace = true, features = ["bundled-sqlite"] }
