@@ -132,7 +132,11 @@ struct PlayerView: View {
         switch panel {
         case nil:
             GeometryReader { geometry in
-                Cover(url: state.track?.cover, size: min(geometry.size.width, geometry.size.height))
+                Cover(
+                    url: state.coverLarge ?? state.track?.cover,
+                    size: min(geometry.size.width, geometry.size.height),
+                    fallback: state.track?.cover
+                )
                     .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }

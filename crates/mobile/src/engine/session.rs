@@ -975,7 +975,7 @@ impl Inner {
             (Some(_), true) => Status::Playing,
             (Some(_), false) => Status::Paused,
         };
-        Some(PlaybackState {
+        let mut state = PlaybackState {
             status,
             provider,
             index: 0,
@@ -985,7 +985,10 @@ impl Inner {
             track,
             volume: *lock(&self.level),
             remote: true,
-        })
+            cover_large: None,
+        };
+        state.cover_large = self.large_cover(&state);
+        Some(state)
     }
 
     pub(super) fn remote_queue(&self) -> Option<Vec<TrackItem>> {

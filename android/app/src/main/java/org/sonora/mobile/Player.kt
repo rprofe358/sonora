@@ -252,7 +252,7 @@ fun PlayerScreen(onClose: () -> Unit) {
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {
-                                Cover(track.cover, cover)
+                                Cover(state.coverLarge ?: track.cover, cover, under = track.cover)
                                 Info(track, slug, centered = true)
                                 Seek(state)
                                 Controls(state, play)
@@ -288,7 +288,7 @@ fun PlayerScreen(onClose: () -> Unit) {
                         }
                         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                             when (val shown = panel) {
-                                null -> Cover(track.cover, minOf(maxWidth, maxHeight) - 8.dp)
+                                null -> Cover(state.coverLarge ?: track.cover, minOf(maxWidth, maxHeight) - 8.dp, under = track.cover)
                                 else -> PanelContent(shown, slug, big = false, onAdd = { adding = true })
                             }
                         }

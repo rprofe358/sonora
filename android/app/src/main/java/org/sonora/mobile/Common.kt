@@ -115,8 +115,9 @@ object Routes {
     fun artist(slug: String, id: String) = "artist/${Uri.encode(slug)}/${Uri.encode(id)}"
 }
 
+/** Una portada. `under` (la miniatura ya cargada) se ve mientras llega `url`, la grande. */
 @Composable
-fun Cover(url: String?, size: Dp, round: Boolean = false) {
+fun Cover(url: String?, size: Dp, round: Boolean = false, under: String? = null) {
     val shape = if (round) CircleShape else RoundedCornerShape(size * 0.08f)
     Box(
         Modifier.size(size).clip(shape).background(MaterialTheme.colorScheme.surfaceVariant),
@@ -127,6 +128,14 @@ fun Cover(url: String?, size: Dp, round: Boolean = false) {
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (under != null && under != url) {
+            AsyncImage(
+                model = fixUrl(under),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
         if (url != null) {
             AsyncImage(
                 model = fixUrl(url),

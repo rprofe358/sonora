@@ -169,6 +169,8 @@ struct Cover: View {
     let url: String?
     let size: CGFloat
     var round = false
+    /// Una versión más pequeña ya cargada, que se ve mientras llega `url`.
+    var fallback: String? = nil
     @State private var image: UIImage?
 
     var body: some View {
@@ -183,9 +185,13 @@ struct Cover: View {
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: round ? size / 2 : size * 0.08))
         .task(id: url) {
-            image = url.flatMap { ImagePipeline.shared.cached($0) }
-            guard image == nil, let url else { return }
-            image = await ImagePipeline.shared.image(url)
+            if let url, let hit = ImagePipeline.shared.cached(url) {
+                image = hit
+                return
+            }
+            image = fallback.flatMap { ImagePipeline.shared.cached($0) }
+            guard let url else { return }
+            if let loaded = await ImagePipeline.shared.image(url) { image = loaded }
         }
     }
 }

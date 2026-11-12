@@ -139,6 +139,8 @@ pub struct PlaybackState {
     pub volume: f32,
     /// Este iPhone controla una sesión sin sonar: lo que se ve es lo que suena en la sesión.
     pub remote: bool,
+    /// La portada de lo que suena en su mayor tamaño, para el reproductor a pantalla completa.
+    pub cover_large: Option<String>,
 }
 
 /// Lo que Swift implementa para enterarse de lo que pasa en el motor.
@@ -206,6 +208,7 @@ impl Engine {
                 scrobbler: Mutex::default(),
                 scrobble_cancel: Arc::default(),
                 liked: Mutex::default(),
+                prefetched: Mutex::default(),
             }),
         })
     }
@@ -706,6 +709,8 @@ struct Inner {
     /// Las canciones guardadas de cada cuenta, para el corazón del reproductor. `None` mientras
     /// se cargan.
     liked: Mutex<HashMap<String, Option<std::collections::HashSet<String>>>>,
+    /// La última canción cuya letra se buscó de antemano.
+    prefetched: Mutex<Option<String>>,
 }
 
 impl Inner {
@@ -980,26 +985,87 @@ impl Inner {
         if let Some(remote) = self.remote_state() {
             return remote;
         }
-        let queue = lock(&self.queue);
-        let now = lock(&self.now);
-        PlaybackState {
-            status: now.status,
-            provider: queue.slug.clone(),
-            track: queue.tracks.get(queue.index).cloned(),
-            index: queue.index as u32,
-            queue_length: queue.tracks.len() as u32,
-            position_ms: now.live().as_millis() as u64,
-            duration_ms: now.duration.as_millis() as u64,
-            volume: *lock(&self.level),
-            remote: false,
+        let mut state = {
+            let queue = lock(&self.queue);
+            let now = lock(&self.now);
+            PlaybackState {
+                status: now.status,
+                provider: queue.slug.clone(),
+                track: queue.tracks.get(queue.index).cloned(),
+                index: queue.index as u32,
+                queue_length: queue.tracks.len() as u32,
+                position_ms: now.live().as_millis() as u64,
+                duration_ms: now.duration.as_millis() as u64,
+                volume: *lock(&self.level),
+                remote: false,
+                cover_large: None,
+            }
+        };
+        state.cover_large = self.large_cover(&state);
+        state
+    }
+
+    /// La portada de lo que suena en grande: el original si el servicio sabe dar uno a partir de
+    /// la miniatura (Spotify), o la misma pedida a 1200 píxeles al servidor de Google (YouTube).
+    pub(super) fn large_cover(&self, state: &PlaybackState) -> Option<String> {
+        let cover = state.track.as_ref()?.cover.as_deref()?;
+        if let Some(slug) = state.provider.as_deref()
+            && let Ok(api) = self.api(slug)
+            && let Some(full) = api.cover_at(cover, music::CoverSize::Full)
+        {
+            return Some(full);
         }
+        Some(google_sized(cover, 1200).unwrap_or_else(|| cover.to_owned()))
     }
 
     fn notify(&self) {
         self.listener.on_state(self.state());
         self.publish();
         self.scrobble_tick();
+        // la letra de lo que suena (y de lo que viene) se busca de antemano
+        if let Some(id) = self.current_id() {
+            let mut last = lock(&self.prefetched);
+            if last.as_deref() != Some(id.as_str()) {
+                *last = Some(id);
+                drop(last);
+                lyrics::prefetch(self);
+            }
+        }
     }
+}
+
+/// Pide al servidor de imágenes de Google (YouTube Music) la misma imagen con el lado mayor en
+/// `edge` píxeles, cambiando las opciones `=w…-h…` (o `=s…`) de la dirección. `None` si no es
+/// una imagen de Google o ya es así de grande.
+fn google_sized(url: &str, edge: u32) -> Option<String> {
+    let (base, options) = url.rsplit_once('=')?;
+    if !(base.contains(".googleusercontent.com/") || base.contains(".ggpht.com/")) {
+        return None;
+    }
+    let number = |option: &str, prefix: char| option.strip_prefix(prefix)?.parse::<u32>().ok();
+    let width = options.split('-').find_map(|option| number(option, 'w'));
+    let height = options.split('-').find_map(|option| number(option, 'h'));
+    let side = options.split('-').find_map(|option| number(option, 's'));
+    let longer = match (width, height, side) {
+        (Some(width), Some(height), _) => width.max(height),
+        (_, _, Some(side)) => side,
+        _ => return None,
+    };
+    if longer == 0 || longer >= edge {
+        return None;
+    }
+    let scale = |value: u32| (u64::from(value) * u64::from(edge) / u64::from(longer)) as u32;
+    let options = options
+        .split('-')
+        .map(|option| match (number(option, 'w'), number(option, 'h'), number(option, 's')) {
+            (Some(value), _, _) => format!("w{}", scale(value)),
+            (_, Some(value), _) => format!("h{}", scale(value)),
+            (_, _, Some(value)) => format!("s{}", scale(value)),
+            _ => option.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join("-");
+    Some(format!("{base}={options}"))
 }
 
 /// Las canciones completas que la app ya vio, por id, para compartirlas en una sesión tal como
@@ -1028,7 +1094,10 @@ fn item(track: &Track) -> Option<TrackItem> {
             .artist_refs
             .iter()
             .find_map(|artist| artist.id.clone()),
-        cover: track.cover.clone(),
+        cover: track
+            .cover
+            .as_deref()
+            .map(|cover| google_sized(cover, 400).unwrap_or_else(|| cover.to_owned())),
         duration_ms: track.duration.as_millis() as u64,
         explicit: track.explicit,
         playable: track.playable,
