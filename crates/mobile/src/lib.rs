@@ -16,6 +16,7 @@ use music::{Lyrics, LyricsProvider, LyricsQuery, MusicProvider};
 
 mod engine;
 mod potoken;
+mod roots;
 
 pub use engine::*;
 pub use potoken::*;
@@ -28,6 +29,7 @@ static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
 /// rustls: reqwest se compila sin uno, igual que en la app de escritorio.
 fn runtime() -> &'static tokio::runtime::Runtime {
     RUNTIME.get_or_init(|| {
+        roots::install();
         rustls::crypto::ring::default_provider()
             .install_default()
             .ok();

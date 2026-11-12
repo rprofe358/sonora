@@ -13,12 +13,19 @@ crate-type = ["staticlib", "lib"]
 
 [dependencies]
 anyhow.workspace = true
+futures.workspace = true
 log.workspace = true
 music.workspace = true
 rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
+# Las raíces de certificados del sistema no se leen en iOS; se usan las de webpki.
+tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
 uniffi = "0.29"
 
 # rquickjs (lo usa ytmusic) no trae bindings precompilados para iOS: se generan al compilar.
 [target.'cfg(target_os = "ios")'.dependencies]
 rquickjs = { version = "0.12", default-features = false, features = ["bindgen"] }
+base64.workspace = true
+webpki-root-certs = "1"
