@@ -49,8 +49,9 @@ jobs:
           export RANLIB_aarch64_linux_android="$BIN/llvm-ranlib"
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$BIN/aarch64-linux-android26-clang"
           # bindgen (para rquickjs) lee las cabeceras de C del NDK.
-          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
-          cargo rustc -p sonora_mobile --lib --target aarch64-linux-android --release --crate-type cdylib
+          # El NDK nuevo exige el nivel de API en el triple, así que se le da a clang.
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot --target=aarch64-linux-android26 -D__ANDROID_API__=26"
+          cargo rustc -p sonora_mobile --lib --target aarch64-linux-android --release --crate-type cdylib --keep-going
           ls -la target/aarch64-linux-android/release/*.so
 
       - name: Bindings de Kotlin (UniFFI)
