@@ -55,6 +55,9 @@ jobs:
           ls -la target/aarch64-linux-android/release/*.so
 
       - name: Bindings de Kotlin (UniFFI)
+        # .cargo/config.toml enlaza con mold en Linux; el runner no lo tiene.
+        env:
+          RUSTFLAGS: ""
         run: |
           cargo run -p uniffi-bindgen -- generate \
             --library target/aarch64-linux-android/release/libsonora_mobile.so \
