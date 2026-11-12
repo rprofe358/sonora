@@ -24,6 +24,10 @@ import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Speaker
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -81,14 +85,14 @@ fun SettingsScreen() {
                 ListItem(
                     headlineContent = { Text("Audio y ecualizador") },
                     leadingContent = { Icon(Icons.Filled.Tune, null) },
-                    modifier = Modifier.clickable { nav.navigate("settings/audio") },
+                    modifier = Modifier.focusRing().clickable { nav.navigate("settings/audio") },
                 )
             }
             item {
                 ListItem(
                     headlineContent = { Text("Scrobbling") },
                     leadingContent = { Icon(Icons.AutoMirrored.Filled.ShowChart, null) },
-                    modifier = Modifier.clickable { nav.navigate("settings/scrobble") },
+                    modifier = Modifier.focusRing().clickable { nav.navigate("settings/scrobble") },
                 )
             }
             item { SectionTitle("Diagnóstico") }
@@ -160,6 +164,7 @@ private val qualities = listOf(
 @Composable
 fun AudioScreen() {
     val settings = Store.audio ?: return
+    val tv = LocalTv.current
     var presets by remember { mutableStateOf(listOf<EqualizerPreset>()) }
     var bands by remember(settings.bands) { mutableStateOf(settings.bands.padded()) }
     LaunchedEffect(Unit) { presets = Store.engine.equalizerPresets() }
@@ -195,16 +200,30 @@ fun AudioScreen() {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(frequencies[band], style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(40.dp))
-                    Slider(
-                        value = bands[band].toFloat(),
-                        onValueChange = { value ->
-                            bands = bands.toMutableList().also { it[band] = (Math.round(value * 2) / 2.0) }
-                        },
-                        onValueChangeFinished = { update { copy(bands = bands) } },
-                        valueRange = -12f..12f,
-                        enabled = settings.equalizer,
-                        modifier = Modifier.weight(1f),
-                    )
+                    if (tv) {
+                        // con el control, una barra atraparía las flechas: botones de medio decibelio
+                        fun step(by: Double) {
+                            bands = bands.toMutableList().also { it[band] = (it[band] + by).coerceIn(-12.0, 12.0) }
+                            update { copy(bands = bands) }
+                        }
+                        IconButton(onClick = { step(-0.5) }, enabled = settings.equalizer) { Icon(Icons.Filled.Remove, "Bajar") }
+                        LinearProgressIndicator(
+                            progress = { ((bands[band] + 12) / 24).toFloat() },
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = { step(0.5) }, enabled = settings.equalizer) { Icon(Icons.Filled.Add, "Subir") }
+                    } else {
+                        Slider(
+                            value = bands[band].toFloat(),
+                            onValueChange = { value ->
+                                bands = bands.toMutableList().also { it[band] = (Math.round(value * 2) / 2.0) }
+                            },
+                            onValueChangeFinished = { update { copy(bands = bands) } },
+                            valueRange = -12f..12f,
+                            enabled = settings.equalizer,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
                     Text("%+.1f".format(bands[band]), style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(48.dp))
                 }
             }
@@ -223,7 +242,7 @@ private fun Toggle(title: String, checked: Boolean, onChange: (Boolean) -> Unit)
     ListItem(
         headlineContent = { Text(title) },
         trailingContent = { Switch(checked = checked, onCheckedChange = onChange) },
-        modifier = Modifier.clickable { onChange(!checked) },
+        modifier = Modifier.focusRing().clickable { onChange(!checked) },
     )
 }
 
@@ -234,7 +253,7 @@ private fun Choice(title: String, value: String, options: List<String>, onPick: 
         ListItem(
             headlineContent = { Text(title) },
             trailingContent = { Text(value, color = MaterialTheme.colorScheme.primary) },
-            modifier = Modifier.clickable(enabled = options.isNotEmpty()) { open = true },
+            modifier = Modifier.focusRing().clickable(enabled = options.isNotEmpty()) { open = true },
         )
         DropdownMenu(expanded = open, onDismissRequest = { open = false }, modifier = Modifier.align(Alignment.TopEnd)) {
             options.forEachIndexed { index, option ->
@@ -279,7 +298,7 @@ fun ScrobbleScreen() {
                             )
                         }
                     },
-                    modifier = Modifier.clickable { nav.navigate("settings/scrobble/${Uri.encode(service.id)}") },
+                    modifier = Modifier.focusRing().clickable { nav.navigate("settings/scrobble/${Uri.encode(service.id)}") },
                 )
             }
             item {

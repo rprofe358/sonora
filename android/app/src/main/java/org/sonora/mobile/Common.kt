@@ -5,6 +5,7 @@ package org.sonora.mobile
 import android.net.Uri
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +31,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Explicit
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
@@ -63,7 +65,10 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -82,6 +87,27 @@ import uniffi.sonora_mobile.TrackItem
 
 /** La navegación de la pestaña actual, para abrir álbumes, playlists y artistas. */
 val LocalNav = staticCompositionLocalOf<NavHostController> { error("sin navegación") }
+
+/** Se usa con control remoto (Android TV, proyectores): sin tocar, con flechas. */
+val LocalTv = staticCompositionLocalOf { false }
+
+/** La pantalla es ancha (TV, tablet): menú lateral y reproductor a dos columnas. */
+val LocalWide = staticCompositionLocalOf { false }
+
+/**
+ * Un recuadro bien visible alrededor de lo que tiene el foco, para moverse con las flechas del
+ * control. Va antes de `clickable` para enterarse del foco de ese elemento.
+ */
+fun Modifier.focusRing(shape: Shape = RoundedCornerShape(10.dp)): Modifier = composed {
+    var focused by remember { mutableStateOf(false) }
+    val color = MaterialTheme.colorScheme.primary
+    this
+        .onFocusChanged { focused = it.isFocused }
+        .then(
+            if (focused) Modifier.border(3.dp, color, shape).background(color.copy(alpha = 0.12f), shape)
+            else Modifier,
+        )
+}
 
 object Routes {
     fun album(slug: String, id: String) = "album/${Uri.encode(slug)}/${Uri.encode(id)}"
@@ -228,8 +254,9 @@ fun TrackRow(
         Row(
             Modifier
                 .fillMaxWidth()
+                .focusRing()
                 .combinedClickable(enabled = track.playable, onClick = onClick, onLongClick = { menu = true })
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(start = 16.dp, top = 8.dp, bottom = 8.dp)
                 .alpha(if (track.playable) 1f else 0.4f),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -265,6 +292,8 @@ fun TrackRow(
                 )
             }
             Text(clock(track.durationMs), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // con el control remoto no se puede mantener pulsado
+            IconButton(onClick = { menu = true }) { Icon(Icons.Filled.MoreVert, "Más opciones") }
         }
         TrackMenu(track, slug, menu, onDismiss = { menu = false }, onRemove = onRemove)
     }
@@ -355,15 +384,15 @@ fun MediaCard(item: MediaItem, slug: String, onPlay: () -> Unit) {
     when (item) {
         is MediaItem.Track -> Box {
             Card(item.track.cover, item.track.title, item.track.artists,
-                Modifier.combinedClickable(onClick = onPlay, onLongClick = { menu = true }))
+                Modifier.focusRing().combinedClickable(onClick = onPlay, onLongClick = { menu = true }))
             TrackMenu(item.track, slug, menu, onDismiss = { menu = false })
         }
         is MediaItem.Album -> Card(item.album.cover, item.album.title, subtitle(item.album),
-            Modifier.clickable { nav.navigate(Routes.album(slug, item.album.id)) })
+            Modifier.focusRing().clickable { nav.navigate(Routes.album(slug, item.album.id)) })
         is MediaItem.Artist -> Card(item.artist.cover, item.artist.name, "Artista",
-            Modifier.clickable { nav.navigate(Routes.artist(slug, item.artist.id)) }, round = true)
+            Modifier.focusRing().clickable { nav.navigate(Routes.artist(slug, item.artist.id)) }, round = true)
         is MediaItem.Playlist -> Card(item.playlist.cover, item.playlist.title, item.playlist.owner,
-            Modifier.clickable { nav.navigate(Routes.playlist(slug, item.playlist.id)) })
+            Modifier.focusRing().clickable { nav.navigate(Routes.playlist(slug, item.playlist.id)) })
         is MediaItem.Genre -> Card(item.cover, item.title, "", Modifier.alpha(0.6f))
     }
 }
@@ -371,7 +400,7 @@ fun MediaCard(item: MediaItem, slug: String, onPlay: () -> Unit) {
 @Composable
 private fun Card(cover: String?, title: String, subtitle: String, modifier: Modifier, round: Boolean = false) {
     Column(
-        modifier.width(140.dp),
+        modifier.width(140.dp).padding(4.dp),
         horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start,
     ) {
         Cover(cover, 140.dp, round)
@@ -395,7 +424,7 @@ fun subtitle(album: AlbumItem): String = if (album.year > 0) "${album.kind} · $
 @Composable
 fun ListRow(cover: String?, title: String, subtitle: String, round: Boolean = false, onClick: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().focusRing().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {

@@ -84,7 +84,7 @@ fun PromptDialog(pending: PendingPrompt) {
                         ListItem(
                             headlineContent = { Text(option.name) },
                             supportingContent = if (detail != null) { { Text(detail) } } else null,
-                            modifier = Modifier.clickable { Store.answer(option.id) },
+                            modifier = Modifier.focusRing().clickable { Store.answer(option.id) },
                         )
                     }
                 }

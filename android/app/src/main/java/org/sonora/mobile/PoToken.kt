@@ -71,6 +71,9 @@ class PoTokenMinter {
     private fun open(binding: String) {
         val web = WebView(Store.app)
         web.settings.javaScriptEnabled = true
+        // invisible: que el control remoto nunca le dé el foco
+        web.isFocusable = false
+        web.isFocusableInTouchMode = false
         web.settings.domStorageEnabled = true
         web.settings.mediaPlaybackRequiresUserGesture = true
         val script = potokenScript()
