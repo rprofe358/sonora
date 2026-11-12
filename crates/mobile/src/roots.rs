@@ -1,10 +1,10 @@
 //! Los certificados raíz para las conexiones seguras. Varias librerías (librespot, su cliente de
 //! OAuth, los WebSockets) leen "los certificados del sistema" con `rustls-native-certs`, que en
-//! iOS no encuentra ninguno y hace fallar el inicio de sesión de Spotify. Esa librería también
+//! iOS y Android no encuentra ninguno y hace fallar el inicio de sesión de Spotify. Esa librería también
 //! acepta un archivo PEM en `SSL_CERT_FILE`, así que al arrancar se escribe uno con las raíces de
 //! Mozilla (las mismas que usa Firefox) y se apunta ahí.
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 pub(crate) fn install() {
     use base64::Engine as _;
     use std::fmt::Write as _;
@@ -35,5 +35,5 @@ pub(crate) fn install() {
     unsafe { std::env::set_var("SSL_CERT_FILE", &path) };
 }
 
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub(crate) fn install() {}

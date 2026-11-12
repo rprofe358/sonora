@@ -25,8 +25,14 @@ tokio.workspace = true
 tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }
 uniffi = "0.29"
 
-# rquickjs (lo usa ytmusic) no trae bindings precompilados para iOS: se generan al compilar.
-[target.'cfg(target_os = "ios")'.dependencies]
+# rquickjs (lo usa ytmusic) no trae bindings precompilados para iOS ni Android: se generan al
+# compilar. Las raíces TLS se escriben a mano en los dos (ver `roots.rs`).
+[target.'cfg(any(target_os = "ios", target_os = "android"))'.dependencies]
 rquickjs = { version = "0.12", default-features = false, features = ["bindgen"] }
 base64.workspace = true
 webpki-root-certs = "1"
+
+# Android: cpal necesita el contexto de la app (JavaVM + Context) para hablar con AAudio.
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"

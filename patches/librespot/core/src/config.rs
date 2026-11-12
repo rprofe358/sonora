@@ -16,6 +16,9 @@ pub(crate) const IOS_CLIENT_ID: &str = "58bd3c95768941ea9eb4350aaa033eb3";
 // como entra Sonora en escritorio.
 pub const OS: &str = if cfg!(target_os = "ios") {
     "macos"
+} else if cfg!(target_os = "android") {
+    // Android también se presenta como escritorio: Linux, como Sonora en Linux.
+    "linux"
 } else {
     std::env::consts::OS
 };

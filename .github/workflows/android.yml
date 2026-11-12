@@ -1,0 +1,92 @@
+name: Android
+
+# Compila el motor de Sonora para Android (arm64) y arma un APK firmado con la clave fija del
+# repo, para que cada versión se instale encima de la anterior.
+on:
+  push:
+    branches: [android, "android-*"]
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain de Rust
+        run: |
+          rustup show active-toolchain || rustup toolchain install
+          rustup target add aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: android
+          cache-on-failure: true
+
+      - name: Dependencias del sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev cmake ninja-build
+
+      - name: Motor en Rust para Android
+        run: |
+          NDK="$ANDROID_NDK_LATEST_HOME"
+          BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export ANDROID_NDK_HOME="$NDK"
+          export ANDROID_NDK_ROOT="$NDK"
+          export CC_aarch64_linux_android="$BIN/aarch64-linux-android26-clang"
+          export CXX_aarch64_linux_android="$BIN/aarch64-linux-android26-clang++"
+          export AR_aarch64_linux_android="$BIN/llvm-ar"
+          export RANLIB_aarch64_linux_android="$BIN/llvm-ranlib"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$BIN/aarch64-linux-android26-clang"
+          # bindgen (para rquickjs) lee las cabeceras de C del NDK.
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
+          cargo rustc -p sonora_mobile --lib --target aarch64-linux-android --release --crate-type cdylib
+          ls -la target/aarch64-linux-android/release/*.so
+
+      - name: Bindings de Kotlin (UniFFI)
+        run: |
+          cargo run -p uniffi-bindgen -- generate \
+            --library target/aarch64-linux-android/release/libsonora_mobile.so \
+            --language kotlin --out-dir android/app/src/main/java
+
+      - name: Librerías nativas
+        run: |
+          LIBS=android/app/src/main/jniLibs/arm64-v8a
+          mkdir -p "$LIBS"
+          cp target/aarch64-linux-android/release/libsonora_mobile.so "$LIBS/"
+          cp "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" "$LIBS/"
+          ls -la "$LIBS"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: APK
+        working-directory: android
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - name: Empaquetar APK
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk SonoraMobile.apk
+          ls -lh SonoraMobile.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SonoraMobile-apk
+          path: SonoraMobile.apk
+          retention-days: 30

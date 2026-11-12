@@ -14,9 +14,12 @@ use music::spotify::SpotifyProvider;
 use music::youtube::YouTubeProvider;
 use music::{Lyrics, LyricsProvider, LyricsQuery, MusicProvider};
 
+mod android;
 mod engine;
 mod potoken;
 mod roots;
+
+pub use android::prepare;
 
 pub use engine::*;
 pub use potoken::*;
