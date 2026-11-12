@@ -17,6 +17,10 @@ struct PlayerView: View {
     @State private var adding = false
     @State private var playlist: PendingAdd?
     @State private var drag: CGFloat = 0
+    /// La portada es clara: texto e iconos casi negros en vez de blancos.
+    @State private var light = false
+
+    private var fg: Color { light ? Color(white: 0.08) : .white }
 
     var body: some View {
         let state = store.state
@@ -35,10 +39,12 @@ struct PlayerView: View {
         }
         .padding(.horizontal, 22)
         .padding(.bottom, 8)
-        .background { Backdrop(url: state.track?.cover) }
+        .background { Backdrop(url: state.track?.cover, light: $light) }
         .offset(y: drag)
-        .environment(\.colorScheme, .dark)
-        .tint(.white)
+        .foregroundStyle(fg)
+        .environment(\.colorScheme, light ? .light : .dark)
+        .tint(fg)
+        .animation(.easeInOut(duration: 0.5), value: light)
         .onAppear { volume = Double(state.volume) }
         .onChange(of: state.track == nil) { gone in
             if gone { dismiss() }
@@ -78,7 +84,7 @@ struct PlayerView: View {
             Spacer()
             menu(state)
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(fg)
         .contentShape(Rectangle())
     }
 
@@ -156,7 +162,7 @@ struct PlayerView: View {
                 Image(systemName: "heart").font(.title3)
             }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(fg)
     }
 
     private func seek(_ state: PlaybackState) -> some View {
@@ -195,7 +201,7 @@ struct PlayerView: View {
             .disabled(state.index + 1 >= state.queueLength)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.white)
+        .foregroundStyle(fg)
     }
 
     @ViewBuilder
@@ -223,7 +229,7 @@ struct PlayerView: View {
             toggle(.session, icon: "person.2.wave.2", label: "Sesión")
         }
         .padding(4)
-        .background(.white.opacity(0.08), in: Capsule())
+        .background(fg.opacity(0.08), in: Capsule())
     }
 
     private func toggle(_ which: PlayerPanel, icon: String, label: String) -> some View {
@@ -234,8 +240,8 @@ struct PlayerView: View {
             Image(systemName: icon)
                 .font(.body.weight(.semibold))
                 .frame(width: 52, height: 36)
-                .background(on ? Color.white.opacity(0.2) : .clear, in: Capsule())
-                .foregroundStyle(on ? Color.white : Color.white.opacity(0.6))
+                .background(on ? fg.opacity(0.2) : .clear, in: Capsule())
+                .foregroundStyle(on ? fg : fg.opacity(0.6))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
@@ -259,9 +265,11 @@ struct PlayerView: View {
     }
 }
 
-/// La portada, borrosa y oscurecida, de fondo.
+/// La portada, muy desenfocada y con un velo, de fondo. Avisa si es clara, para poner encima
+/// texto oscuro.
 struct Backdrop: View {
     let url: String?
+    @Binding var light: Bool
     @State private var image: UIImage?
 
     var body: some View {
@@ -272,14 +280,16 @@ struct Backdrop: View {
                     Image(uiImage: image)
                         .resizable()
                         .scaledToFill()
-                        .blur(radius: 60)
-                        .scaleEffect(1.4)
+                        .blur(radius: 80)
+                        .scaleEffect(1.5)
                 }
                 .clipped()
                 .transition(.opacity)
             }
             LinearGradient(
-                colors: [.black.opacity(0.3), .black.opacity(0.7)],
+                colors: light
+                    ? [.white.opacity(0.2), .white.opacity(0.4)]
+                    : [.black.opacity(0.3), .black.opacity(0.6)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -288,9 +298,38 @@ struct Backdrop: View {
         .animation(.easeInOut(duration: 0.4), value: image)
         .task(id: url) {
             image = url.flatMap { ImagePipeline.shared.cached($0) }
-            guard image == nil, let url else { return }
-            image = await ImagePipeline.shared.image(url)
+            if image == nil, let url {
+                image = await ImagePipeline.shared.image(url)
+            }
+            light = (image?.averageLuminance ?? 0) > 0.6
         }
+    }
+}
+
+extension UIImage {
+    /// El brillo medio de la imagen (0 negro, 1 blanco).
+    var averageLuminance: CGFloat? {
+        guard let source = cgImage else { return nil }
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let drawn: Bool = pixel.withUnsafeMutableBytes { buffer in
+            guard let context = CGContext(
+                data: buffer.baseAddress,
+                width: 1,
+                height: 1,
+                bitsPerComponent: 8,
+                bytesPerRow: 4,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ) else { return false }
+            context.interpolationQuality = .medium
+            context.draw(source, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+            return true
+        }
+        guard drawn else { return nil }
+        let red = CGFloat(pixel[0]) / 255
+        let green = CGFloat(pixel[1]) / 255
+        let blue = CGFloat(pixel[2]) / 255
+        return 0.2126 * red + 0.7152 * green + 0.0722 * blue
     }
 }
 
@@ -328,7 +367,7 @@ struct QueuePanel: View {
                         .buttonStyle(.plain)
                         .opacity(index < current ? 0.5 : 1)
                         .deleteDisabled(index == current)
-                        .listRowBackground(index == current ? Color.white.opacity(0.12) : Color.clear)
+                        .listRowBackground(index == current ? Color.primary.opacity(0.12) : Color.clear)
                     }
                     .onDelete { offsets in
                         for index in offsets.sorted(by: >) {

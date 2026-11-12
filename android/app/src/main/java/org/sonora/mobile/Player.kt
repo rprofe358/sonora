@@ -1,6 +1,22 @@
 package org.sonora.mobile
 
 import android.os.Build
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.graphics.luminance
+import androidx.palette.graphics.Palette
+import coil3.SingletonImageLoader
+import coil3.request.allowHardware
+import coil3.toBitmap
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
@@ -104,16 +120,51 @@ import kotlin.math.abs
 /** Lo que se ve junto a los controles: la letra, la cola o la sesión. */
 private enum class Panel { LYRICS, QUEUE, SESSION }
 
-/** Los colores del reproductor: texto claro sobre la portada desenfocada. */
-private val playerColors = darkColorScheme(
-    primary = Color.White,
-    onPrimary = Color.Black,
-    onSurface = Color.White,
-    onSurfaceVariant = Color.White.copy(alpha = 0.7f),
-    secondaryContainer = Color.White.copy(alpha = 0.16f),
-    onSecondaryContainer = Color.White,
-    surfaceVariant = Color.White.copy(alpha = 0.1f),
+/** Los colores sacados de la portada: los del fondo y si encima va texto claro u oscuro. */
+private data class Tint(val top: Color, val bottom: Color, val light: Boolean)
+
+private val neutral = Tint(Color(0xFF2A2A2A), Color(0xFF121212), light = false)
+
+/** Casi negro para portadas claras, blanco para las oscuras. */
+private val ink = Color(0xFF151515)
+
+/** Los colores del reproductor según si el fondo es claro u oscuro. */
+private fun playerColors(content: Color, light: Boolean) = darkColorScheme(
+    primary = content,
+    onPrimary = if (light) Color.White else Color.Black,
+    surface = if (light) Color(0xFFF2F2F2) else Color(0xFF1E1E1E),
+    onSurface = content,
+    onSurfaceVariant = content.copy(alpha = 0.7f),
+    secondaryContainer = content.copy(alpha = 0.14f),
+    onSecondaryContainer = content,
+    surfaceVariant = content.copy(alpha = 0.1f),
+    surfaceContainer = if (light) Color(0xFFF2F2F2) else Color(0xFF242424),
+    surfaceContainerHigh = if (light) Color(0xFFEDEDED) else Color(0xFF2A2A2A),
+    outline = content.copy(alpha = 0.5f),
 )
+
+/** Saca de la portada el color dominante (con Palette) y decide si el texto va claro u oscuro. */
+@Composable
+private fun rememberTint(cover: String?): Tint {
+    val context = LocalContext.current
+    var tint by remember { mutableStateOf(neutral) }
+    LaunchedEffect(cover) {
+        if (cover == null) return@LaunchedEffect
+        val request = ImageRequest.Builder(context).data(fixUrl(cover)).size(96).allowHardware(false).build()
+        val image = SingletonImageLoader.get(context).execute(request).image ?: return@LaunchedEffect
+        tint = withContext(Dispatchers.Default) {
+            val palette = Palette.from(image.toBitmap()).generate()
+            val dominant = Color(palette.getDominantColor(0xFF2A2A2A.toInt()))
+            val light = dominant.luminance() > 0.55f
+            Tint(
+                top = dominant,
+                bottom = lerp(dominant, if (light) Color.White else Color.Black, 0.45f),
+                light = light,
+            )
+        }
+    }
+    return tint
+}
 
 /**
  * El reproductor a pantalla completa, sobre la portada desenfocada. En el teléfono la portada,
@@ -131,18 +182,21 @@ fun PlayerScreen(onClose: () -> Unit) {
         onDismissRequest = onClose,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        MaterialTheme(colorScheme = playerColors) {
+        val tint = rememberTint(Store.state?.track?.cover)
+        val content by animateColorAsState(if (tint.light) ink else Color.White, tween(600), label = "content")
+        MaterialTheme(colorScheme = playerColors(content, tint.light)) {
+          CompositionLocalProvider(LocalContentColor provides content) {
             val state = Store.state
             val track = state?.track
             if (state == null || track == null) {
                 LaunchedEffect(Unit) { onClose() }
-                return@MaterialTheme
+                return@CompositionLocalProvider
             }
             val tv = LocalTv.current
             LaunchedEffect(Unit) { if (tv) runCatching { play.requestFocus() } }
             val slug = state.provider ?: Store.selected
             Box(Modifier.fillMaxSize()) {
-                Backdrop(track.cover)
+                Backdrop(track.cover, tint)
                 if (wide) {
                     Row(
                         Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 32.dp, vertical = 16.dp),
@@ -206,32 +260,45 @@ fun PlayerScreen(onClose: () -> Unit) {
                 }
             }
             if (adding) AddSongs(slug) { adding = false }
+          }
         }
     }
 }
 
-/** La portada, borrosa y oscurecida, de fondo. */
+/**
+ * El fondo: desde Android 12, la portada muy desenfocada con un velo; en Android 11 y antes (sin
+ * desenfoque en el sistema), un degradado con el color dominante de la portada.
+ */
 @Composable
-private fun Backdrop(cover: String?) {
+private fun Backdrop(cover: String?, tint: Tint) {
     val context = LocalContext.current
-    Box(Modifier.fillMaxSize().background(Color(0xFF141414))) {
-        if (cover != null) {
-            // una versión diminuta estirada ya se ve desenfocada, también donde no hay blur (Android 11)
-            val request = remember(cover) { ImageRequest.Builder(context).data(fixUrl(cover)).size(40).build() }
+    val top by animateColorAsState(tint.top, tween(700), label = "top")
+    val bottom by animateColorAsState(tint.bottom, tween(700), label = "bottom")
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(top, bottom)))) {
+        if (cover != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val request = remember(cover) { ImageRequest.Builder(context).data(fixUrl(cover)).size(256).build() }
             AsyncImage(
                 model = request,
                 contentDescription = null,
                 contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().then(
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) Modifier.blur(40.dp) else Modifier,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        // agrandada, para que el borde del desenfoque quede fuera de la pantalla
+                        scaleX = 1.35f
+                        scaleY = 1.35f
+                    }
+                    .blur(90.dp, BlurredEdgeTreatment.Rectangle),
+            )
+            val veil = if (tint.light) Color.White else Color.Black
+            Box(
+                Modifier.fillMaxSize().background(
+                    Brush.verticalGradient(
+                        listOf(veil.copy(alpha = if (tint.light) 0.2f else 0.3f), veil.copy(alpha = if (tint.light) 0.4f else 0.6f)),
+                    ),
                 ),
             )
         }
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.35f), Color.Black.copy(alpha = 0.7f))),
-            ),
-        )
     }
 }
 
@@ -339,7 +406,7 @@ private fun Volume(state: PlaybackState) {
 @Composable
 private fun Toggles(panel: Panel?, onPanel: (Panel?) -> Unit) {
     Row(
-        Modifier.background(Color.White.copy(alpha = 0.08f), RoundedCornerShape(50)),
+        Modifier.background(LocalContentColor.current.copy(alpha = 0.08f), RoundedCornerShape(50)),
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Toggle(Icons.Filled.Lyrics, "Letra", panel == Panel.LYRICS) { onPanel(if (it) Panel.LYRICS else null) }
@@ -356,7 +423,7 @@ private fun Toggle(icon: ImageVector, label: String, checked: Boolean, onChange:
             label,
             tint = if (checked) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             modifier = if (checked) {
-                Modifier.background(Color.White.copy(alpha = 0.18f), RoundedCornerShape(50)).padding(6.dp)
+                Modifier.background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f), RoundedCornerShape(50)).padding(6.dp)
             } else {
                 Modifier.padding(6.dp)
             },
@@ -485,8 +552,21 @@ private fun SyncedLyrics(result: LyricsResult, big: Boolean) {
     val position = Store.state?.positionMs ?: 0uL
     val active = result.lines.indexOfLast { it.startMs <= position }
     val list = rememberLazyListState()
+    var first by remember { mutableStateOf(true) }
     LaunchedEffect(active) {
-        if (active >= 0) list.animateScrollToItem(active)
+        if (active < 0) return@LaunchedEffect
+        val info = list.layoutInfo
+        val target = info.viewportSize.height * 0.3f
+        val item = info.visibleItemsInfo.firstOrNull { it.index == active }
+        if (item == null || first) {
+            // lejos (o al abrir): salta sin animar
+            list.scrollToItem(active)
+            first = false
+            return@LaunchedEffect
+        }
+        // cerca: se desliza despacio hasta dejar la línea a un tercio de la altura
+        val now = item.offset - info.viewportStartOffset
+        list.animateScrollBy(now - target, tween(durationMillis = 900, easing = FastOutSlowInEasing))
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
         LazyColumn(
@@ -514,31 +594,39 @@ private fun SyncedLyrics(result: LyricsResult, big: Boolean) {
     }
 }
 
+/**
+ * Una línea de la letra. Todas ocupan el espacio de la línea grande y las demás se encogen con
+ * una escala, así el texto no cambia de tamaño ni empuja a las otras al pasar de una a otra.
+ */
 @Composable
 private fun LyricLine(text: String, current: Boolean, distance: Int, big: Boolean, onClick: () -> Unit) {
-    val size by animateFloatAsState(
-        when {
-            current && big -> 40f
-            current -> 30f
-            big -> 28f
-            else -> 22f
-        },
-        label = "lyric-size",
+    val spec = tween<Float>(durationMillis = 700, easing = FastOutSlowInEasing)
+    val scale by animateFloatAsState(if (current) 1f else 0.8f, spec, label = "lyric-scale")
+    val fade by animateFloatAsState(if (current) 1f else if (distance <= 1) 0.5f else 0.3f, spec, label = "lyric-alpha")
+    val blur by animateDpAsState(
+        if (current) 0.dp else if (distance <= 1) 2.dp else 4.dp,
+        tween(durationMillis = 700, easing = FastOutSlowInEasing),
+        label = "lyric-blur",
     )
-    val alpha by animateFloatAsState(if (current) 1f else if (distance <= 1) 0.5f else 0.35f, label = "lyric-alpha")
-    val blur by animateDpAsState(if (current) 0.dp else if (distance <= 1) 2.dp else 4.dp, label = "lyric-blur")
+    val size = if (big) 38f else 28f
     val blurred = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && blur > 0.2.dp
     Text(
         text.ifEmpty { "♪" },
         fontSize = size.sp,
-        lineHeight = (size * 1.28f).sp,
+        lineHeight = (size * 1.25f).sp,
         fontWeight = FontWeight.Bold,
-        color = Color.White.copy(alpha = alpha),
+        color = LocalContentColor.current,
         modifier = Modifier
             .fillMaxWidth()
             .focusRing()
             .clickable(onClick = onClick)
-            .padding(vertical = 10.dp, horizontal = 4.dp)
+            .padding(vertical = 6.dp, horizontal = 4.dp)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+                alpha = fade
+                transformOrigin = TransformOrigin(0f, 0.5f)
+            }
             .then(if (blurred) Modifier.blur(blur, BlurredEdgeTreatment.Unbounded) else Modifier),
     )
 }

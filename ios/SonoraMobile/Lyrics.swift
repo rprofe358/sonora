@@ -78,12 +78,11 @@ struct SyncedLyrics: View {
                             .padding(.top, 16)
                         Color.clear.frame(height: geometry.size.height * 0.6)
                     }
-                    .animation(.easeOut(duration: 0.35), value: active)
                 }
                 .scrollIndicators(.hidden)
                 .onChange(of: active) { line in
                     guard let line else { return }
-                    withAnimation(.easeInOut(duration: 0.45)) {
+                    withAnimation(.easeInOut(duration: 0.8)) {
                         proxy.scrollTo(line, anchor: UnitPoint(x: 0.5, y: 0.3))
                     }
                 }
@@ -99,6 +98,8 @@ struct SyncedLyrics: View {
     }
 }
 
+/// Una línea de la letra. Todas ocupan el espacio de la línea grande y las demás se encogen con
+/// una escala, así el texto no cambia de tamaño ni empuja a las otras al pasar de una a otra.
 private struct LyricLine: View {
     let text: String
     let current: Bool
@@ -106,11 +107,15 @@ private struct LyricLine: View {
 
     var body: some View {
         Text(text.isEmpty ? "♪" : text)
-            .font(.system(size: current ? 30 : 22, weight: .bold))
-            .foregroundStyle(.white.opacity(current ? 1 : (distance <= 1 ? 0.5 : 0.35)))
-            .blur(radius: current ? 0 : (distance <= 1 ? 1.5 : 3))
+            .font(.system(size: 28, weight: .bold))
+            .foregroundStyle(.primary)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 10)
+            .scaleEffect(current ? 1 : 0.8, anchor: .leading)
+            .opacity(current ? 1 : (distance <= 1 ? 0.5 : 0.3))
+            .blur(radius: current ? 0 : (distance <= 1 ? 1.5 : 3))
+            .animation(.easeInOut(duration: 0.7), value: current)
+            .animation(.easeInOut(duration: 0.7), value: distance)
+            .padding(.vertical, 6)
             .contentShape(Rectangle())
     }
 }
