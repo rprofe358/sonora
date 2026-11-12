@@ -33,7 +33,7 @@ struct SessionList: View {
     @ViewBuilder
     private var outside: some View {
         Section {
-            Text("Escucha lo mismo a la vez que otras apps de Sonora, como la del PC. Una persona inicia la sesión y comparte su código de 6 dígitos.")
+            Text("Escucha lo mismo a la vez que otros dispositivos con TK-Music o con Sonora en el PC. Una persona inicia la sesión y comparte su código de 6 dígitos.")
                 .foregroundStyle(.secondary)
         }
         Section {
@@ -72,7 +72,7 @@ struct SessionList: View {
                 Text("Código").font(.caption).foregroundStyle(.secondary)
                 Text(spaced(session.code))
                     .font(.system(size: 44, weight: .bold, design: .monospaced))
-                ShareLink(item: "Únete a mi Sonora Session con el código \(session.code)") {
+                ShareLink(item: "Únete a mi sesión de TK-Music con el código \(session.code)") {
                     Label("Compartir código", systemImage: "square.and.arrow.up")
                 }
             }

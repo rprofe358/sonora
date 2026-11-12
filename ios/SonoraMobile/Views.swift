@@ -63,7 +63,25 @@ struct SearchView: View {
             }
             .navigationTitle("Buscar")
             .searchable(text: $query, prompt: "Canciones, artistas, álbumes")
+            .searchSuggestions {
+                if query.isEmpty {
+                    ForEach(store.recentSearches, id: \.self) { text in
+                        Label(text, systemImage: "clock.arrow.circlepath").searchCompletion(text)
+                    }
+                }
+            }
             .onSubmit(of: .search, run)
+            // Búsqueda predictiva: los resultados se actualizan mientras se escribe, tras una pausa corta.
+            .task(id: "\(store.selected)|\(query)") {
+                let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard text.count >= 2, !store.signedIn.isEmpty else {
+                    if text.isEmpty { results = nil }
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                guard !Task.isCancelled else { return }
+                await find(text, in: store.selected, loud: false)
+            }
             .withPlayerBar()
         }
     }
@@ -71,19 +89,22 @@ struct SearchView: View {
     private func run() {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !store.signedIn.isEmpty else { return }
+        store.rememberSearch(text)
         let slug = store.selected
+        Task { await find(text, in: slug, loud: true) }
+    }
+
+    private func find(_ text: String, in slug: String, loud: Bool) async {
         searching = true
-        Task {
-            let found = await store.run { try $0.searchAll(slug: slug, query: text) }
-            switch found {
-            case .success(let value):
-                results = value
-                searchedIn = slug
-            case .failure(let error):
-                store.problem = describe(error)
-            }
-            searching = false
+        let found = await store.run { try $0.searchAll(slug: slug, query: text) }
+        switch found {
+        case .success(let value):
+            results = value
+            searchedIn = slug
+        case .failure(let error):
+            if loud { store.problem = describe(error) }
         }
+        searching = false
     }
 }
 
@@ -290,7 +311,7 @@ struct AccountsView: View {
                     }
                 }
                 Section("Diagnóstico") {
-                    LabeledContent("Motor Sonora", value: engineVersion())
+                    LabeledContent("Motor (Sonora)", value: engineVersion())
                     ForEach(outputs, id: \.self) { output in
                         Label(output, systemImage: "hifispeaker")
                     }
@@ -351,7 +372,7 @@ struct LocalSection: View {
                 Button("Volver a buscar") { store.openLocal() }
                 Button("Quitar", role: .destructive) { store.closeLocal() }
             } else {
-                Button("Buscar canciones en la carpeta de Sonora") { store.openLocal() }
+                Button("Buscar canciones en la carpeta de TK-Music") { store.openLocal() }
             }
             Button {
                 importing = true
@@ -361,7 +382,7 @@ struct LocalSection: View {
         } header: {
             Text("Música del iPhone")
         } footer: {
-            Text("También puedes copiar música a «En mi iPhone › Sonora» en la app Archivos (o desde el PC con iTunes) y tocar «Volver a buscar». Aparece como «\(provider.name)» en Inicio, Buscar y Biblioteca, con su letra.")
+            Text("También puedes copiar música a «En mi iPhone › TK-Music» en la app Archivos (o desde el PC con iTunes) y tocar «Volver a buscar». Aparece como «\(provider.name)» en Inicio, Buscar y Biblioteca, con su letra.")
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { store.importSongs(urls) }

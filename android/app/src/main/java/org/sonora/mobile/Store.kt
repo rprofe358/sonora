@@ -66,6 +66,7 @@ object Store : EngineListener {
         if (saved != null) engine.setAudioSettings(saved)
         audio = saved ?: engine.audioSettings()
         refresh()
+        loadRecent()
         restoreStored()
         if (preferences.getBoolean("local.on", false) && canReadMusic()) openLocal(quiet = true)
         minter.start()
@@ -232,6 +233,26 @@ object Store : EngineListener {
             it.stopSelf()
         }
         main.postDelayed({ android.os.Process.killProcess(android.os.Process.myPid()) }, 300)
+    }
+
+    // ── Búsquedas recientes ────────────────────────────────────────────────────────────────
+
+    var recent by mutableStateOf(listOf<String>())
+        private set
+
+    private fun loadRecent() {
+        recent = preferences.getString("search.recent", "")!!.split("\n").filter { it.isNotBlank() }
+    }
+
+    /** Guarda una búsqueda (la más nueva primero, sin repetir, hasta 12). */
+    fun remember(text: String) {
+        recent = (listOf(text) + recent.filterNot { it.equals(text, ignoreCase = true) }).take(12)
+        preferences.edit().putString("search.recent", recent.joinToString("\n")).apply()
+    }
+
+    fun forget(text: String) {
+        recent = recent - text
+        preferences.edit().putString("search.recent", recent.joinToString("\n")).apply()
     }
 
     // ── Canciones del teléfono ─────────────────────────────────────────────────────────────

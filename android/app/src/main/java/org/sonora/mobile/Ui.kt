@@ -3,6 +3,8 @@
 package org.sonora.mobile
 
 import android.net.Uri
+import androidx.compose.ui.res.painterResource
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -125,7 +127,7 @@ private val tabs = listOf(
 @Composable
 fun SonoraRoot() {
     val nav = rememberNavController()
-    var player by remember { mutableStateOf(false) }
+    var player by rememberSaveable { mutableStateOf(false) }
     val entry by nav.currentBackStackEntryAsState()
     val route = entry?.destination?.route
     val context = LocalContext.current
@@ -179,7 +181,7 @@ fun SonoraRoot() {
             Surface(Modifier.fillMaxSize()) {
                 Row(Modifier.fillMaxSize().safeDrawingPadding()) {
                     NavigationRail(header = {
-                        Icon(Icons.Filled.GraphicEq, null, Modifier.padding(vertical = 12.dp), tint = MaterialTheme.colorScheme.primary)
+                        Icon(painterResource(R.drawable.ic_notification), "TK-Music", Modifier.padding(vertical = 12.dp).size(32.dp), tint = MaterialTheme.colorScheme.primary)
                     }) {
                         Spacer(Modifier.weight(1f))
                         tabs.forEachIndexed { index, tab ->

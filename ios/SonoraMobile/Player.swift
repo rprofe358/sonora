@@ -20,34 +20,24 @@ struct PlayerView: View {
     /// La portada es clara: texto e iconos casi negros en vez de blancos.
     @State private var light = false
     /// Lo que se tocó en el corazón, mientras el servicio lo confirma.
-    @State private var hearted: [String: Bool] = [:]
 
     private var fg: Color { light ? Color(white: 0.08) : .white }
 
     var body: some View {
         let state = store.state
-        VStack(spacing: 14) {
-            header(state)
-                .gesture(dismissDrag)
-            center(state)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            if let track = state.track {
-                info(track, slug: state.provider ?? store.selected)
+        GeometryReader { geometry in
+            if geometry.size.width > geometry.size.height {
+                landscape(state, height: geometry.size.height)
+            } else {
+                portrait(state)
             }
-            seek(state)
-            controls(state)
-            volumeRow(state)
-            toggles
         }
-        .padding(.horizontal, 22)
-        .padding(.bottom, 8)
         .background { Backdrop(url: state.track?.cover, light: $light) }
         .offset(y: drag)
         .foregroundStyle(fg)
         .environment(\.colorScheme, light ? .light : .dark)
         .tint(fg)
         .animation(.easeInOut(duration: 0.5), value: light)
-        .onAppear { volume = Double(state.volume) }
         .onChange(of: state.track == nil) { gone in
             if gone { dismiss() }
         }
@@ -71,6 +61,65 @@ struct PlayerView: View {
     }
 
     // MARK: Partes
+
+    private func portrait(_ state: PlaybackState) -> some View {
+        VStack(spacing: 14) {
+            header(state)
+                .gesture(dismissDrag)
+            center(state)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if let track = state.track {
+                info(track, slug: state.provider ?? store.selected)
+            }
+            VisualizerView(color: fg).frame(height: 32)
+            seek(state)
+            controls(state)
+            remoteNote(state)
+            toggles
+        }
+        .padding(.horizontal, 22)
+        .padding(.bottom, 8)
+    }
+
+    /// De lado: portada y controles a la izquierda, letra (o cola, o sesión) a la derecha.
+    private func landscape(_ state: PlaybackState, height: CGFloat) -> some View {
+        HStack(spacing: 24) {
+            ScrollView {
+                VStack(spacing: 10) {
+                    Cover(
+                        url: state.coverLarge ?? state.track?.cover,
+                        size: max(120, height * 0.45),
+                        fallback: state.track?.cover
+                    )
+                    .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
+                    if let track = state.track {
+                        info(track, slug: state.provider ?? store.selected)
+                    }
+                    VisualizerView(color: fg).frame(height: 24)
+                    seek(state)
+                    controls(state)
+                    remoteNote(state)
+                }
+            }
+            .scrollIndicators(.hidden)
+            .frame(maxWidth: .infinity)
+            VStack(spacing: 8) {
+                header(state)
+                    .gesture(dismissDrag)
+                Group {
+                    switch panel ?? .lyrics {
+                    case .queue: QueuePanel { adding = true }
+                    case .session: SessionList(slug: state.provider).scrollContentBackground(.hidden)
+                    default: LyricsPanel()
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                toggles
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 16)
+    }
 
     private func header(_ state: PlaybackState) -> some View {
         HStack {
@@ -162,16 +211,7 @@ struct PlayerView: View {
                     .lineLimit(1)
             }
             Spacer()
-            // el motor avisa con un estado nuevo cuando termina de cargar las guardadas
-            let saved = hearted[track.id] ?? store.engine.trackSaved(slug: slug, id: track.id)
-            Button {
-                hearted[track.id] = !saved
-                store.save(.track, id: track.id, from: slug, saved: !saved, quiet: true)
-            } label: {
-                Image(systemName: saved ? "heart.fill" : "heart")
-                    .font(.title3)
-            }
-            .accessibilityLabel(saved ? "Quitar de tu biblioteca" : "Guardar en tu biblioteca")
+            HeartButton(track: track, slug: slug)
         }
         .foregroundStyle(fg)
     }
@@ -215,20 +255,14 @@ struct PlayerView: View {
         .foregroundStyle(fg)
     }
 
+    /// En «solo controlar» se avisa de que la música suena en otro lado. El volumen va con los
+    /// botones del iPhone.
     @ViewBuilder
-    private func volumeRow(_ state: PlaybackState) -> some View {
+    private func remoteNote(_ state: PlaybackState) -> some View {
         if state.remote {
             Label("Controlas la sesión: esto suena en los otros dispositivos.", systemImage: "slider.horizontal.3")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-        } else {
-            HStack {
-                Image(systemName: "speaker.fill").foregroundStyle(.secondary)
-                Slider(value: $volume, in: 0...1) { editing in
-                    if !editing { store.engine.setVolume(level: Float(volume)) }
-                }
-                Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
-            }
         }
     }
 
@@ -273,6 +307,74 @@ struct PlayerView: View {
 
     private func providerName(_ slug: String?) -> String? {
         store.providers.first(where: { $0.slug == slug })?.name
+    }
+}
+
+/// El corazón: lleno si la canción está entre las guardadas. Con su propio estado por canción,
+/// para que el cambio se vea al momento mientras el servicio lo confirma.
+struct HeartButton: View {
+    @EnvironmentObject private var store: Store
+    let track: TrackItem
+    let slug: String
+    @State private var mine: Bool?
+
+    var body: some View {
+        // el motor avisa con un estado nuevo cuando termina de cargar las guardadas
+        let saved = mine ?? store.engine.trackSaved(slug: slug, id: track.id)
+        Button {
+            let next = !saved
+            mine = next
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            store.save(.track, id: track.id, from: slug, saved: next, quiet: true)
+        } label: {
+            Image(systemName: saved ? "heart.fill" : "heart")
+                .font(.title2)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(saved ? "Quitar de tu biblioteca" : "Guardar en tu biblioteca")
+        .id(track.id)
+    }
+}
+
+/// Barras que siguen la música (32 bandas, de graves a agudos), leídas del motor unas 30 veces
+/// por segundo mientras se ven. Al salir, el motor deja de analizar.
+struct VisualizerView: View {
+    @EnvironmentObject private var store: Store
+    let color: Color
+    @State private var bands: [Float] = []
+
+    var body: some View {
+        Canvas { context, size in
+            let count = bands.count
+            guard count > 0 else { return }
+            let gap: CGFloat = 3
+            let width = max(1, (size.width - gap * CGFloat(count - 1)) / CGFloat(count))
+            for (index, level) in bands.enumerated() {
+                let value = CGFloat(min(max(level, 0), 1))
+                let height = max(2, value * size.height)
+                let rect = CGRect(
+                    x: CGFloat(index) * (width + gap),
+                    y: size.height - height,
+                    width: width,
+                    height: height
+                )
+                context.fill(
+                    Path(roundedRect: rect, cornerRadius: width / 2),
+                    with: .color(color.opacity(0.35 + 0.5 * value))
+                )
+            }
+        }
+        .task {
+            let engine = store.engine
+            while !Task.isCancelled {
+                bands = await Task.detached { engine.spectrum() }.value
+                try? await Task.sleep(nanoseconds: 33_000_000)
+            }
+            engine.spectrumStop()
+        }
+        .accessibilityHidden(true)
     }
 }
 

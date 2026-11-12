@@ -68,7 +68,7 @@ private fun Outside(slug: String?) {
     var code by rememberSaveable { mutableStateOf("") }
     var remote by rememberSaveable { mutableStateOf(false) }
     Text(
-        "Escucha lo mismo a la vez que otras apps de Sonora, como la del PC. Una persona inicia la sesión y comparte su código de 6 dígitos.",
+        "Escucha lo mismo a la vez que otros dispositivos con TK-Music o con Sonora en el PC. Una persona inicia la sesión y comparte su código de 6 dígitos.",
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     Text("Unirse con un código", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
@@ -122,7 +122,7 @@ private fun InSession(session: SessionInfo) {
         TextButton(onClick = {
             val share = Intent(Intent.ACTION_SEND)
                 .setType("text/plain")
-                .putExtra(Intent.EXTRA_TEXT, "Únete a mi Sonora Session con el código ${session.code}")
+                .putExtra(Intent.EXTRA_TEXT, "Únete a mi sesión de TK-Music con el código ${session.code}")
             context.startActivity(Intent.createChooser(share, "Compartir código"))
         }) {
             Icon(Icons.Filled.Share, null)

@@ -209,6 +209,7 @@ impl Engine {
                 scrobble_cancel: Arc::default(),
                 liked: Mutex::default(),
                 prefetched: Mutex::default(),
+                spectrum: Mutex::default(),
             }),
         })
     }
@@ -597,6 +598,28 @@ impl Engine {
         self.inner.notify();
     }
 
+    /// Las 32 bandas (de graves a agudos, de 0 a 1) de lo que suena, para el visualizador. La app
+    /// la llama unas 30 veces por segundo mientras se ve; mientras nadie la llama no se analiza
+    /// nada. Vacío si no suena nada aquí (o en modo «solo controlar»).
+    pub fn spectrum(&self) -> Vec<f32> {
+        let spectrum = lock(&self.inner.active)
+            .as_ref()
+            .and_then(|active| active.player.spectrum());
+        let Some(spectrum) = spectrum else {
+            *lock(&self.inner.spectrum) = None;
+            return Vec::new();
+        };
+        // el nuevo antes de soltar el anterior, para que el análisis no se corte
+        let listening = spectrum.listen();
+        *lock(&self.inner.spectrum) = Some(listening);
+        spectrum.bands()
+    }
+
+    /// El visualizador ya no se ve: deja de analizar.
+    pub fn spectrum_stop(&self) {
+        *lock(&self.inner.spectrum) = None;
+    }
+
     /// Vacía lo que viene después de la canción actual, que sigue sonando.
     pub fn clear_queue(&self) {
         if self.inner.remote() {
@@ -711,6 +734,8 @@ struct Inner {
     liked: Mutex<HashMap<String, Option<std::collections::HashSet<String>>>>,
     /// La última canción cuya letra se buscó de antemano.
     prefetched: Mutex<Option<String>>,
+    /// Mientras el visualizador está a la vista, el reproductor analiza lo que suena.
+    spectrum: Mutex<Option<music::Listening>>,
 }
 
 impl Inner {

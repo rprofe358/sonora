@@ -1,6 +1,13 @@
 package org.sonora.mobile
 
 import android.app.Activity
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.LocalConfiguration
+import kotlinx.coroutines.delay
 import android.os.Build
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -219,7 +226,7 @@ private fun rememberTint(cover: String?): Tint {
 @Composable
 fun PlayerScreen(onClose: () -> Unit) {
     val wide = LocalWide.current
-    var panel by remember { mutableStateOf(if (wide) Panel.LYRICS else null) }
+    var panel by rememberSaveable { mutableStateOf(if (wide) Panel.LYRICS else null) }
     var adding by remember { mutableStateOf(false) }
     val play = remember { FocusRequester() }
 
@@ -238,12 +245,18 @@ fun PlayerScreen(onClose: () -> Unit) {
             val tv = LocalTv.current
             LaunchedEffect(Unit) { if (tv) runCatching { play.requestFocus() } }
             val slug = state.provider ?: Store.selected
+            // el teléfono de lado usa las dos columnas de la TV y la tablet
+            val configuration = LocalConfiguration.current
+            val twoColumns = wide || configuration.screenWidthDp > configuration.screenHeightDp
             Box(Modifier.fillMaxSize()) {
                 Backdrop(track.cover, tint)
-                if (wide) {
+                if (twoColumns) {
                     Row(
-                        Modifier.fillMaxSize().safeDrawingPadding().padding(horizontal = 32.dp, vertical = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(40.dp),
+                        Modifier.fillMaxSize().safeDrawingPadding().padding(
+                            horizontal = if (wide) 32.dp else 20.dp,
+                            vertical = if (wide) 16.dp else 8.dp,
+                        ),
+                        horizontalArrangement = Arrangement.spacedBy(if (wide) 40.dp else 24.dp),
                     ) {
                         BoxWithConstraints(Modifier.weight(0.42f).fillMaxHeight(), contentAlignment = Alignment.Center) {
                             val cover = minOf(maxWidth * 0.8f, maxHeight * 0.48f)
@@ -254,16 +267,19 @@ fun PlayerScreen(onClose: () -> Unit) {
                             ) {
                                 Cover(state.coverLarge ?: track.cover, cover, under = track.cover)
                                 Info(track, slug, centered = true)
+                                Visualizer(Modifier.fillMaxWidth().height(32.dp))
                                 Seek(state)
                                 Controls(state, play)
-                                Volume(state)
+                                RemoteNote(state)
                             }
                         }
                         Column(Modifier.weight(0.58f).fillMaxHeight()) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Spacer(Modifier.weight(1f))
                                 TrackActions(track, slug, onClose, onAdd = { adding = true })
-                                IconButton(onClick = onClose) { Icon(Icons.Filled.Close, "Cerrar") }
+                                IconButton(onClick = onClose) {
+                                    Icon(if (wide) Icons.Filled.Close else Icons.Filled.KeyboardArrowDown, "Cerrar")
+                                }
                             }
                             Box(Modifier.weight(1f).fillMaxWidth()) {
                                 PanelContent(panel ?: Panel.LYRICS, slug, big = true, onAdd = { adding = true })
@@ -293,9 +309,10 @@ fun PlayerScreen(onClose: () -> Unit) {
                             }
                         }
                         Info(track, slug, centered = false)
+                        Visualizer(Modifier.fillMaxWidth().height(36.dp).padding(top = 6.dp))
                         Seek(state)
                         Controls(state, play)
-                        Volume(state)
+                        RemoteNote(state)
                         Row(Modifier.fillMaxWidth().padding(bottom = 8.dp), horizontalArrangement = Arrangement.Center) {
                             Toggles(panel) { panel = it }
                         }
@@ -428,30 +445,51 @@ private fun Controls(state: PlaybackState, play: FocusRequester) {
     }
 }
 
+/** En «solo controlar» se avisa de que la música suena en otro lado. El volumen lo lleva el teléfono. */
 @Composable
-private fun Volume(state: PlaybackState) {
-    when {
-        state.remote -> Text(
-            "Controlas la sesión: esto suena en los otros dispositivos.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        // en TV el volumen va con los botones del control
-        LocalTv.current -> Unit
-        else -> {
-            var volume by remember { mutableStateOf(state.volume) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.AutoMirrored.Filled.VolumeDown, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                Slider(
-                    value = volume,
-                    onValueChange = { volume = it },
-                    onValueChangeFinished = { Store.engine.setVolume(volume) },
-                    modifier = Modifier.weight(1f),
-                )
-                Icon(Icons.AutoMirrored.Filled.VolumeUp, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun RemoteNote(state: PlaybackState) {
+    if (!state.remote) return
+    Text(
+        "Controlas la sesión: esto suena en los otros dispositivos.",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        modifier = Modifier.fillMaxWidth(),
+    )
+}
+
+/**
+ * Barras que siguen la música (32 bandas, de graves a agudos), leídas del motor unas 30 veces
+ * por segundo mientras se ven. Al salir, el motor deja de analizar.
+ */
+@Composable
+private fun Visualizer(modifier: Modifier) {
+    var bands by remember { mutableStateOf(FloatArray(0)) }
+    LaunchedEffect(Unit) {
+        try {
+            while (true) {
+                bands = withContext(Dispatchers.Default) { Store.engine.spectrum() }.toFloatArray()
+                delay(33)
             }
+        } finally {
+            Store.engine.spectrumStop()
+        }
+    }
+    val color = LocalContentColor.current
+    Canvas(modifier) {
+        val count = bands.size
+        if (count == 0) return@Canvas
+        val gap = 3.dp.toPx()
+        val width = ((size.width - gap * (count - 1)) / count).coerceAtLeast(1f)
+        val least = 2.dp.toPx()
+        bands.forEachIndexed { index, level ->
+            val height = (level.coerceIn(0f, 1f) * size.height).coerceAtLeast(least)
+            drawRoundRect(
+                color = color.copy(alpha = 0.35f + 0.5f * level.coerceIn(0f, 1f)),
+                topLeft = Offset(index * (width + gap), size.height - height),
+                size = Size(width, height),
+                cornerRadius = CornerRadius(width / 2, width / 2),
+            )
         }
     }
 }

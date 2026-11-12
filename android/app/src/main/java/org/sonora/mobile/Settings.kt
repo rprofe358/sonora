@@ -99,7 +99,7 @@ fun SettingsScreen() {
                 )
             }
             item { SectionTitle("Diagnóstico") }
-            item { ListItem(headlineContent = { Text("Motor Sonora") }, trailingContent = { Text(engineVersion()) }) }
+            item { ListItem(headlineContent = { Text("Motor (Sonora)") }, trailingContent = { Text(engineVersion()) }) }
             items(outputs) { output ->
                 ListItem(headlineContent = { Text(output) }, leadingContent = { Icon(Icons.Filled.Speaker, null) })
             }
@@ -155,7 +155,7 @@ private fun ProviderSection(provider: ProviderInfo) {
 private fun LocalSection(provider: ProviderInfo) {
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) Store.openLocal()
-        else Store.problem = "Sin el permiso de música, Sonora no puede ver las canciones del teléfono."
+        else Store.problem = "Sin el permiso de música, TK-Music no puede ver las canciones del teléfono."
     }
     val folder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         val path = uri?.let { folderPath(it) }

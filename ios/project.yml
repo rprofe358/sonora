@@ -19,13 +19,13 @@ targets:
     info:
       path: SonoraMobile/Info.plist
       properties:
-        CFBundleDisplayName: Sonora
+        CFBundleDisplayName: TK-Music
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
         # La carpeta de Sonora aparece en la app Archivos, para copiar ahí la música.
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
-        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rprofe358.sonoramobile

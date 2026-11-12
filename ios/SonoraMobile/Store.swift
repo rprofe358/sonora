@@ -87,6 +87,17 @@ final class Store: ObservableObject {
 
     func account(_ slug: String) -> Account? { engine.account(slug: slug) }
 
+    // MARK: Búsquedas recientes
+
+    @Published private(set) var recentSearches: [String] =
+        UserDefaults.standard.stringArray(forKey: "search.recent") ?? []
+
+    /// Guarda una búsqueda (la más nueva primero, sin repetir, hasta 12).
+    func rememberSearch(_ text: String) {
+        recentSearches = Array(([text] + recentSearches.filter { $0.caseInsensitiveCompare(text) != .orderedSame }).prefix(12))
+        UserDefaults.standard.set(recentSearches, forKey: "search.recent")
+    }
+
     // MARK: Canciones del iPhone
 
     @Published var localBusy = false

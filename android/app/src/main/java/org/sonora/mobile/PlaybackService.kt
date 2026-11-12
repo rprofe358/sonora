@@ -69,7 +69,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
                 setShowBadge(false)
             },
         )
-        media = MediaSessionCompat(this, "Sonora").apply {
+        media = MediaSessionCompat(this, "TK-Music").apply {
             setCallback(object : MediaSessionCompat.Callback() {
                 override fun onPlay() = Store.engine.play()
                 override fun onPause() = Store.engine.pause()
@@ -169,7 +169,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
     private fun showPlaceholder() {
         val notification = NotificationCompat.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Sonora")
+            .setContentTitle("TK-Music")
             .setSilent(true)
             .build()
         goForeground(notification)
@@ -246,7 +246,7 @@ class PlaybackService : MediaBrowserServiceCompat() {
                 button(PlaybackStateCompat.ACTION_PLAY_PAUSE),
             )
             .addAction(R.drawable.ic_notification_next, "Siguiente", button(PlaybackStateCompat.ACTION_SKIP_TO_NEXT))
-            .addAction(R.drawable.ic_notification_close, "Cerrar Sonora", close)
+            .addAction(R.drawable.ic_notification_close, "Cerrar TK-Music", close)
             .setStyle(
                 androidx.media.app.NotificationCompat.MediaStyle()
                     .setMediaSession(media.sessionToken)

@@ -21,6 +21,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Favorite
@@ -47,6 +49,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -59,6 +62,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import uniffi.sonora_mobile.AlbumItem
 import uniffi.sonora_mobile.MediaItem
@@ -121,20 +125,38 @@ fun SearchScreen() {
     var searching by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
-    fun run() {
-        val text = query.trim()
-        if (text.isEmpty() || Store.signedIn.isEmpty()) return
-        val slug = Store.selected
+    suspend fun find(text: String, slug: String, loud: Boolean) {
         searching = true
-        scope.launch {
+        try {
             Store.run { it.searchAll(slug, text) }
                 .onSuccess {
                     results = it
                     searchedIn = slug
                 }
-                .onFailure { Store.problem = describe(it) }
+                .onFailure { if (loud) Store.problem = describe(it) }
+        } finally {
             searching = false
         }
+    }
+
+    fun run() {
+        val text = query.trim()
+        if (text.isEmpty() || Store.signedIn.isEmpty()) return
+        Store.remember(text)
+        val slug = Store.selected
+        scope.launch { find(text, slug, loud = true) }
+    }
+
+    // Búsqueda predictiva: los resultados se actualizan mientras se escribe, tras una pausa corta.
+    val selected = Store.selected
+    LaunchedEffect(query, selected) {
+        val text = query.trim()
+        if (text.length < 2 || Store.signedIn.isEmpty()) {
+            if (text.isEmpty()) results = null
+            return@LaunchedEffect
+        }
+        delay(350)
+        find(text, selected, loud = false)
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -160,7 +182,20 @@ fun SearchScreen() {
         Box(Modifier.fillMaxSize()) {
             val found = results
             LazyColumn(Modifier.fillMaxSize()) {
-                if (found != null) {
+                if (query.isBlank() && Store.recent.isNotEmpty()) {
+                    item { SectionTitle("Búsquedas recientes") }
+                    items(Store.recent, key = { "recent-$it" }) { text ->
+                        Row(
+                            Modifier.fillMaxWidth().focusRing().clickable { query = text }.padding(start = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(text, Modifier.weight(1f).padding(horizontal = 16.dp), maxLines = 1)
+                            IconButton(onClick = { Store.forget(text) }) { Icon(Icons.Filled.Close, "Quitar") }
+                        }
+                    }
+                }
+                if (found != null && query.isNotBlank()) {
                     if (found.artists.isNotEmpty()) {
                         item { SectionTitle("Artistas") }
                         item {

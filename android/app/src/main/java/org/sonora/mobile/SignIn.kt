@@ -71,7 +71,7 @@ fun PromptDialog(pending: PendingPrompt) {
                 AlertDialog(
                     onDismissRequest = {},
                     title = { Text("Iniciar sesión") },
-                    text = { Text("Termina de iniciar sesión en el navegador. Cuando veas que se completó, vuelve a Sonora.") },
+                    text = { Text("Termina de iniciar sesión en el navegador. Cuando veas que se completó, vuelve a TK-Music.") },
                     confirmButton = { TextButton(onClick = { openTab(context, browser, prompt.url) }) { Text("Abrir de nuevo") } },
                     dismissButton = { TextButton(onClick = { Store.cancelSignIn() }) { Text("Cancelar") } },
                 )

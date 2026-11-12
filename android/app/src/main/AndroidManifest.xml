@@ -23,7 +23,7 @@
 
     <application
         android:name=".SonoraApp"
-        android:label="Sonora"
+        android:label="TK-Music"
         android:icon="@mipmap/ic_launcher"
         android:banner="@drawable/banner"
         android:theme="@android:style/Theme.Material.NoActionBar"
