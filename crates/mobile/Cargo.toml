@@ -36,3 +36,5 @@ webpki-root-certs = "1"
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
 ndk-context = "0.1"
+# Android no deja enlazar con su SQLite: se compila el de la librería.
+music = { workspace = true, features = ["bundled-sqlite"] }
