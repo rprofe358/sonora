@@ -25,7 +25,7 @@ jobs:
       - name: Toolchain de Rust
         run: |
           rustup show active-toolchain || rustup toolchain install
-          rustup target add aarch64-linux-android
+          rustup target add aarch64-linux-android armv7-linux-androideabi
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -41,18 +41,28 @@ jobs:
         run: |
           NDK="$ANDROID_NDK_LATEST_HOME"
           BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          SYSROOT="$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
           export ANDROID_NDK_HOME="$NDK"
           export ANDROID_NDK_ROOT="$NDK"
+          # arm64 para teléfonos; armv7 para proyectores y TV que traen Android de 32 bits.
+          # El NDK nuevo exige el nivel de API en el triple, así que se le da a clang y a bindgen
+          # (rquickjs lee las cabeceras de C del NDK).
           export CC_aarch64_linux_android="$BIN/aarch64-linux-android26-clang"
           export CXX_aarch64_linux_android="$BIN/aarch64-linux-android26-clang++"
           export AR_aarch64_linux_android="$BIN/llvm-ar"
           export RANLIB_aarch64_linux_android="$BIN/llvm-ranlib"
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$BIN/aarch64-linux-android26-clang"
-          # bindgen (para rquickjs) lee las cabeceras de C del NDK.
-          # El NDK nuevo exige el nivel de API en el triple, así que se le da a clang.
-          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot --target=aarch64-linux-android26 -D__ANDROID_API__=26"
-          cargo rustc -p sonora_mobile --lib --target aarch64-linux-android --release --crate-type cdylib --keep-going
-          ls -la target/aarch64-linux-android/release/*.so
+          export BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="--sysroot=$SYSROOT --target=aarch64-linux-android26 -D__ANDROID_API__=26"
+          export CC_armv7_linux_androideabi="$BIN/armv7a-linux-androideabi26-clang"
+          export CXX_armv7_linux_androideabi="$BIN/armv7a-linux-androideabi26-clang++"
+          export AR_armv7_linux_androideabi="$BIN/llvm-ar"
+          export RANLIB_armv7_linux_androideabi="$BIN/llvm-ranlib"
+          export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$BIN/armv7a-linux-androideabi26-clang"
+          export BINDGEN_EXTRA_CLANG_ARGS_armv7_linux_androideabi="--sysroot=$SYSROOT --target=armv7a-linux-androideabi26 -D__ANDROID_API__=26"
+          for TARGET in aarch64-linux-android armv7-linux-androideabi; do
+            cargo rustc -p sonora_mobile --lib --target $TARGET --release --crate-type cdylib --keep-going
+            ls -la target/$TARGET/release/*.so
+          done
 
       - name: Bindings de Kotlin (UniFFI)
         # .cargo/config.toml enlaza con mold en Linux; el runner no lo tiene.
@@ -65,11 +75,14 @@ jobs:
 
       - name: Librerías nativas
         run: |
-          LIBS=android/app/src/main/jniLibs/arm64-v8a
-          mkdir -p "$LIBS"
-          cp target/aarch64-linux-android/release/libsonora_mobile.so "$LIBS/"
-          cp "$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/libc++_shared.so" "$LIBS/"
-          ls -la "$LIBS"
+          STL="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib"
+          LIBS=android/app/src/main/jniLibs
+          mkdir -p "$LIBS/arm64-v8a" "$LIBS/armeabi-v7a"
+          cp target/aarch64-linux-android/release/libsonora_mobile.so "$LIBS/arm64-v8a/"
+          cp "$STL/aarch64-linux-android/libc++_shared.so" "$LIBS/arm64-v8a/"
+          cp target/armv7-linux-androideabi/release/libsonora_mobile.so "$LIBS/armeabi-v7a/"
+          cp "$STL/arm-linux-androideabi/libc++_shared.so" "$LIBS/armeabi-v7a/"
+          ls -laR "$LIBS"
 
       - uses: actions/setup-java@v4
         with:
