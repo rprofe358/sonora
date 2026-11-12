@@ -143,7 +143,7 @@ fun SonoraRoot() {
                 }
                 // La vista web que acuña tokens de YouTube: montada, pero invisible.
                 Store.minter.view?.let { web ->
-                    AndroidView(factory = { web }, modifier = Modifier.size(1.dp).alpha(0f))
+                    AndroidView(factory = { (web.parent as? android.view.ViewGroup)?.removeView(web); web }, modifier = Modifier.size(1.dp).alpha(0f))
                 }
             }
         }

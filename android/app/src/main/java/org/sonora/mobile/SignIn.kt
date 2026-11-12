@@ -80,9 +80,10 @@ fun PromptDialog(pending: PendingPrompt) {
             text = {
                 LazyColumn(Modifier.heightIn(max = 400.dp)) {
                     items(prompt.options, key = { it.id }) { option ->
+                        val detail = option.detail
                         ListItem(
                             headlineContent = { Text(option.name) },
-                            supportingContent = option.detail?.let { { Text(it) } },
+                            supportingContent = if (detail != null) { { Text(detail) } } else null,
                             modifier = Modifier.clickable { Store.answer(option.id) },
                         )
                     }

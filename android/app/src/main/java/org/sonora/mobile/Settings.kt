@@ -164,7 +164,7 @@ fun AudioScreen() {
     var bands by remember(settings.bands) { mutableStateOf(settings.bands.padded()) }
     LaunchedEffect(Unit) { presets = Store.engine.equalizerPresets() }
 
-    fun apply(change: AudioSettings.() -> AudioSettings) = Store.applyAudio(settings.change())
+    fun update(change: AudioSettings.() -> AudioSettings) = Store.applyAudio(settings.change())
 
     Column(Modifier.fillMaxSize()) {
         Bar("Audio", back = true)
@@ -172,21 +172,21 @@ fun AudioScreen() {
             item { SectionTitle("Reproducción") }
             item {
                 Choice("Calidad", qualities.first { it.first == settings.quality }.second, qualities.map { it.second }) { index ->
-                    apply { copy(quality = qualities[index].first) }
+                    update { copy(quality = qualities[index].first) }
                 }
             }
-            item { Toggle("Igualar el volumen entre canciones", settings.normalisation) { apply { copy(normalisation = it) } } }
-            item { Toggle("Pasar sin silencios entre canciones", settings.gapless) { apply { copy(gapless = it) } } }
+            item { Toggle("Igualar el volumen entre canciones", settings.normalisation) { update { copy(normalisation = it) } } }
+            item { Toggle("Pasar sin silencios entre canciones", settings.gapless) { update { copy(gapless = it) } } }
             item {
                 Note("Cada servicio da la calidad más cercana que tenga a la elegida. Cambiar estos ajustes reinicia la canción donde iba.")
             }
             item { HorizontalDivider(Modifier.padding(top = 8.dp)) }
             item { SectionTitle("Ecualizador") }
-            item { Toggle("Ecualizador", settings.equalizer) { apply { copy(equalizer = it) } } }
+            item { Toggle("Ecualizador", settings.equalizer) { update { copy(equalizer = it) } } }
             item {
                 val current = presets.firstOrNull { matches(it.gains, settings.bands) }?.name ?: "Personalizado"
                 Choice("Ajuste predefinido", current, presets.map { it.name }) { index ->
-                    apply { copy(bands = presets[index].gains, equalizer = true) }
+                    update { copy(bands = presets[index].gains, equalizer = true) }
                 }
             }
             items(10) { band ->
@@ -200,7 +200,7 @@ fun AudioScreen() {
                         onValueChange = { value ->
                             bands = bands.toMutableList().also { it[band] = (Math.round(value * 2) / 2.0) }
                         },
-                        onValueChangeFinished = { apply { copy(bands = bands) } },
+                        onValueChangeFinished = { update { copy(bands = bands) } },
                         valueRange = -12f..12f,
                         enabled = settings.equalizer,
                         modifier = Modifier.weight(1f),
