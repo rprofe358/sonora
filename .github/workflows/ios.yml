@@ -13,7 +13,8 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15
+    # Los Mac con Apple Silicon de GitHub suelen estar saturados; los Intel compilan lo mismo.
+    runs-on: macos-15-intel
     timeout-minutes: 150
     env:
       IPHONEOS_DEPLOYMENT_TARGET: "16.0"
