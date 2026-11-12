@@ -62,7 +62,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import uniffi.sonora_mobile.AlbumItem
 import uniffi.sonora_mobile.MediaItem
@@ -153,6 +155,22 @@ fun SearchScreen() {
         scope.launch { find(text, slug, loud = true) }
     }
 
+    // Sugerencias de YouTube Music mientras se escribe, como en su app.
+    var suggestions by remember { mutableStateOf(listOf<String>()) }
+    LaunchedEffect(query) {
+        val text = query.trim()
+        if (text.isEmpty() || Store.signedIn.isEmpty()) {
+            suggestions = emptyList()
+            return@LaunchedEffect
+        }
+        delay(150)
+        val slug = Store.selected
+        suggestions = withContext(Dispatchers.IO) { runCatching { Store.engine.suggestions(slug, text) }.getOrDefault(emptyList()) }
+            .filterNot { it.equals(text, ignoreCase = true) }
+            .distinct()
+            .take(5)
+    }
+
     // Búsqueda predictiva: los resultados se actualizan mientras se escribe, tras una pausa corta.
     val selected = Store.selected
     LaunchedEffect(query, selected) {
@@ -198,6 +216,20 @@ fun SearchScreen() {
                             Icon(Icons.Filled.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(text, Modifier.weight(1f).padding(horizontal = 16.dp), maxLines = 1)
                             IconButton(onClick = { Store.forget(text) }) { Icon(Icons.Filled.Close, "Quitar") }
+                        }
+                    }
+                }
+                if (query.isNotBlank()) {
+                    items(suggestions, key = { "suggestion-$it" }) { text ->
+                        Row(
+                            Modifier.fillMaxWidth().focusRing().clickable {
+                                query = text
+                                run()
+                            }.padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(Icons.Filled.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(text, Modifier.weight(1f).padding(start = 16.dp), maxLines = 1)
                         }
                     }
                 }

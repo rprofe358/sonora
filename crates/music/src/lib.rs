@@ -2,6 +2,7 @@ mod aac;
 pub mod apple;
 pub mod artwork;
 mod audio;
+pub mod betterlyrics;
 pub mod binimum;
 mod calendar;
 pub mod connect;
@@ -354,6 +355,11 @@ pub trait MusicApi: Send + Sync {
     ) -> Result<(Vec<Track>, Option<String>)>;
 
     async fn search(&self, query: &str) -> Result<Vec<Track>>;
+
+    /// Lo que el servicio sugiere mientras se escribe una búsqueda. Vacío si no sugiere nada.
+    async fn search_suggestions(&self, _query: &str) -> Result<Vec<String>> {
+        Ok(Vec::new())
+    }
 
     async fn search_albums(&self, _query: &str) -> Result<Vec<Album>> {
         Ok(Vec::new())

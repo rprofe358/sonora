@@ -427,7 +427,19 @@ final class Store: ObservableObject {
         self.prompt = PendingPrompt(slug: slug, prompt: prompt)
     }
 
+    /// Cuándo llegó el último estado, para adelantar la posición entre uno y otro.
+    private(set) var stateAt = Date()
+
+    /// La posición ahora: el motor la da cada medio segundo y entre medio se adelanta con el
+    /// reloj, para que el karaoke encienda cada palabra a tiempo.
+    func smoothPosition(at date: Date) -> UInt64 {
+        guard state.status == .playing else { return state.positionMs }
+        let extra = min(1500, max(0, date.timeIntervalSince(stateAt) * 1000))
+        return min(max(state.durationMs, state.positionMs), state.positionMs + UInt64(extra))
+    }
+
     func apply(_ state: PlaybackState) {
+        stateAt = Date()
         self.state = state
         nowPlaying.update(state)
     }

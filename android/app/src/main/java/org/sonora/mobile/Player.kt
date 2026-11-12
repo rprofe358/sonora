@@ -1,6 +1,14 @@
 package org.sonora.mobile
 
 import android.app.Activity
+import android.os.SystemClock
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import uniffi.sonora_mobile.LyricWord
+import uniffi.sonora_mobile.Status
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.Canvas
 import androidx.compose.ui.geometry.CornerRadius
@@ -641,8 +649,23 @@ private fun Centered(text: String) {
  */
 @Composable
 private fun SyncedLyrics(result: LyricsResult, big: Boolean) {
-    val position = Store.state?.positionMs ?: 0uL
-    val active = result.lines.indexOfLast { it.startMs <= position }
+    // El motor da la posición cada medio segundo; entre medio se adelanta con el reloj, para que
+    // las palabras del karaoke se enciendan a tiempo.
+    val state = Store.state
+    val reported = state?.positionMs?.toLong() ?: 0L
+    val playing = state?.status == Status.PLAYING
+    var anchor by remember { mutableStateOf(0L to 0L) }
+    LaunchedEffect(reported, playing) { anchor = reported to SystemClock.uptimeMillis() }
+    var tick by remember { mutableLongStateOf(SystemClock.uptimeMillis()) }
+    val worded = remember(result) { result.lines.any { it.words.isNotEmpty() } }
+    LaunchedEffect(playing, worded) {
+        while (playing) {
+            tick = SystemClock.uptimeMillis()
+            delay(if (worded) 40 else 200)
+        }
+    }
+    val position = if (playing) anchor.first + (tick - anchor.second).coerceIn(0, 1500) else reported
+    val active = result.lines.indexOfLast { it.startMs.toLong() <= position }
     val list = rememberLazyListState()
     var first by remember { mutableStateOf(true) }
     LaunchedEffect(active) {
@@ -669,6 +692,8 @@ private fun SyncedLyrics(result: LyricsResult, big: Boolean) {
             itemsIndexed(result.lines) { index, line ->
                 LyricLine(
                     text = line.text,
+                    words = line.words,
+                    position = if (index == active) position else 0L,
                     current = index == active,
                     distance = if (active < 0) 99 else abs(index - active),
                     big = big,
@@ -691,7 +716,15 @@ private fun SyncedLyrics(result: LyricsResult, big: Boolean) {
  * una escala, así el texto no cambia de tamaño ni empuja a las otras al pasar de una a otra.
  */
 @Composable
-private fun LyricLine(text: String, current: Boolean, distance: Int, big: Boolean, onClick: () -> Unit) {
+private fun LyricLine(
+    text: String,
+    words: List<LyricWord>,
+    position: Long,
+    current: Boolean,
+    distance: Int,
+    big: Boolean,
+    onClick: () -> Unit,
+) {
     val spec = tween<Float>(durationMillis = 700, easing = FastOutSlowInEasing)
     val scale by animateFloatAsState(if (current) 1f else 0.8f, spec, label = "lyric-scale")
     val fade by animateFloatAsState(if (current) 1f else if (distance <= 1) 0.5f else 0.3f, spec, label = "lyric-alpha")
@@ -702,8 +735,21 @@ private fun LyricLine(text: String, current: Boolean, distance: Int, big: Boolea
     )
     val size = if (big) 38f else 28f
     val blurred = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && blur > 0.2.dp
+    val glow = LocalContentColor.current
+    // Karaoke: en la línea que suena, las palabras ya cantadas se encienden y las demás esperan.
+    val shown = if (current && words.isNotEmpty()) {
+        buildAnnotatedString {
+            for (word in words) {
+                withStyle(SpanStyle(color = glow.copy(alpha = if (word.startMs.toLong() <= position) 1f else 0.4f))) {
+                    append(word.text)
+                }
+            }
+        }
+    } else {
+        AnnotatedString(text.ifEmpty { "♪" })
+    }
     Text(
-        text.ifEmpty { "♪" },
+        shown,
         fontSize = size.sp,
         lineHeight = (size * 1.25f).sp,
         fontWeight = FontWeight.Bold,

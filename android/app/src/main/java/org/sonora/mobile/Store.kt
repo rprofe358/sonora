@@ -68,7 +68,8 @@ object Store : EngineListener {
         refresh()
         loadRecent()
         restoreStored()
-        if (preferences.getBoolean("local.on", false) && canReadMusic()) openLocal(quiet = true)
+        // la música del teléfono aparece sola si ya hay permiso (salvo que se haya quitado)
+        if (!preferences.getBoolean("local.off", false) && canReadMusic()) openLocal(quiet = true)
         minter.start()
     }
 
@@ -267,30 +268,66 @@ object Store : EngineListener {
     fun canReadMusic() = androidx.core.content.ContextCompat.checkSelfPermission(app, musicPermission) ==
         android.content.pm.PackageManager.PERMISSION_GRANTED
 
-    /** Las carpetas donde buscar: Música y Descargas, más las que se agreguen. */
-    val localFolders: List<String>
-        get() = preferences.getStringSet("local.folders", null)?.sorted() ?: listOf(
-            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC).path,
-            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS).path,
-        )
+    /** Las carpetas con música que se están mirando, para mostrarlas en Ajustes. */
+    var localFolders by mutableStateOf(listOf<String>())
+        private set
+
+    /** Las carpetas que se agregaron a mano, además de las que conoce Android. */
+    private val extraFolders: Set<String>
+        get() = preferences.getStringSet("local.extra", null) ?: emptySet()
 
     fun addLocalFolder(path: String) {
-        preferences.edit().putStringSet("local.folders", (localFolders + path).toSet()).apply()
+        preferences.edit().putStringSet("local.extra", extraFolders + path).apply()
         openLocal()
     }
 
     fun removeLocalFolder(path: String) {
-        preferences.edit().putStringSet("local.folders", (localFolders - path).toSet()).apply()
-        if (localFolders.isEmpty()) closeLocal() else openLocal()
+        preferences.edit().putStringSet("local.extra", extraFolders - path).apply()
+        openLocal()
+    }
+
+    fun isExtraFolder(path: String) = path in extraFolders
+
+    /**
+     * Las carpetas donde hay música, según el índice de Android (el mismo que usan las apps de
+     * música, como BoomingMusic): así aparecen solas todas las canciones del teléfono, estén donde
+     * estén. Se quitan las que están dentro de otra, porque cada una se recorre con sus subcarpetas.
+     */
+    private fun musicFolders(): List<String> {
+        val found = mutableSetOf<String>()
+        runCatching {
+            app.contentResolver.query(
+                android.provider.MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                arrayOf(android.provider.MediaStore.Audio.Media.DATA),
+                "${android.provider.MediaStore.Audio.Media.IS_MUSIC} != 0",
+                null,
+                null,
+            )?.use { cursor ->
+                val column = cursor.getColumnIndexOrThrow(android.provider.MediaStore.Audio.Media.DATA)
+                while (cursor.moveToNext()) {
+                    cursor.getString(column)?.let { java.io.File(it).parent }?.let(found::add)
+                }
+            }
+        }
+        val all = (found + extraFolders).map { it.trimEnd('/') }.distinct().sorted()
+        val outer = mutableListOf<String>()
+        for (path in all) if (outer.none { path == it || path.startsWith("$it/") }) outer += path
+        return outer.ifEmpty {
+            listOf(
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC).path,
+                android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS).path,
+            )
+        }
     }
 
     /** Busca (o vuelve a buscar) las canciones del teléfono. */
     fun openLocal(quiet: Boolean = false) {
         localBusy = true
-        val folders = localFolders
         launch {
+            val folders = withContext(Dispatchers.IO) { musicFolders() }
+            localFolders = folders
             run { it.openLocal(folders) }
-                .onSuccess { preferences.edit().putBoolean("local.on", true).apply() }
+                .onSuccess { preferences.edit().putBoolean("local.off", false).apply() }
                 .onFailure { if (!quiet) problem = describe(it) }
             localBusy = false
             libraryRevision++
@@ -299,7 +336,7 @@ object Store : EngineListener {
     }
 
     fun closeLocal() {
-        preferences.edit().putBoolean("local.on", false).apply()
+        preferences.edit().putBoolean("local.off", true).apply()
         signOut("local")
     }
 

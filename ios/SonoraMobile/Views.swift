@@ -11,6 +11,7 @@ struct SearchView: View {
     @State private var results: SearchResults?
     @State private var searchedIn = ""
     @State private var searching = false
+    @State private var suggestions: [String] = []
 
     var body: some View {
         RoutedStack {
@@ -68,7 +69,30 @@ struct SearchView: View {
                     ForEach(store.recentSearches, id: \.self) { text in
                         Label(text, systemImage: "clock.arrow.circlepath").searchCompletion(text)
                     }
+                } else {
+                    ForEach(suggestions, id: \.self) { text in
+                        Label(text, systemImage: "magnifyingglass").searchCompletion(text)
+                    }
                 }
+            }
+            // Sugerencias de YouTube Music mientras se escribe, como en su app.
+            .task(id: query) {
+                let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty, !store.signedIn.isEmpty else {
+                    suggestions = []
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                guard !Task.isCancelled else { return }
+                let engine = store.engine
+                let slug = store.selected
+                let found = await Task.detached { engine.suggestions(slug: slug, input: text) }.value
+                guard !Task.isCancelled else { return }
+                var seen = Set<String>()
+                suggestions = found
+                    .filter { $0.caseInsensitiveCompare(text) != .orderedSame && seen.insert($0.lowercased()).inserted }
+                    .prefix(6)
+                    .map { $0 }
             }
             .onSubmit(of: .search, run)
             // Búsqueda predictiva: los resultados se actualizan mientras se escribe, tras una pausa corta.

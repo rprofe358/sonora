@@ -57,13 +57,20 @@ struct SyncedLyrics: View {
     let result: LyricsResult
 
     var body: some View {
-        let active = activeLine(at: store.state.positionMs)
-        GeometryReader { geometry in
+        let worded = result.lines.contains { !$0.words.isEmpty }
+        TimelineView(.periodic(from: .now, by: worded ? 0.05 : 0.25)) { context in
+            sheet(position: store.smoothPosition(at: context.date))
+        }
+    }
+
+    private func sheet(position: UInt64) -> some View {
+        let active = activeLine(at: position)
+        return GeometryReader { geometry in
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         Color.clear.frame(height: geometry.size.height * 0.3)
-                        lines(active: active)
+                        lines(active: active, position: position)
                         Text("Letra: \(result.source)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
@@ -85,10 +92,17 @@ struct SyncedLyrics: View {
         }
     }
 
-    private func lines(active: Int?) -> some View {
+    private func lines(active: Int?, position: UInt64) -> some View {
         ForEach(Array(result.lines.enumerated()), id: \.offset) { index, line in
             let distance: Int = active.map { abs(index - $0) } ?? 99
-            LyricRow(text: line.text, current: index == active, distance: distance)
+            let current = index == active
+            LyricRow(
+                text: line.text,
+                words: current ? line.words : [],
+                position: current ? position : 0,
+                current: current,
+                distance: distance
+            )
                 .id(index)
                 .onTapGesture { store.engine.seek(positionMs: line.startMs) }
         }
@@ -103,11 +117,21 @@ struct SyncedLyrics: View {
 /// una escala, así el texto no cambia de tamaño ni empuja a las otras al pasar de una a otra.
 private struct LyricRow: View {
     let text: String
+    let words: [LyricWord]
+    let position: UInt64
     let current: Bool
     let distance: Int
 
+    /// Karaoke: en la línea que suena, las palabras ya cantadas se encienden y las demás esperan.
+    private var styled: Text {
+        guard current, !words.isEmpty else { return Text(text.isEmpty ? "♪" : text) }
+        return words.reduce(Text("")) { line, word in
+            line + Text(word.text).foregroundColor(word.startMs <= position ? .primary : .primary.opacity(0.4))
+        }
+    }
+
     var body: some View {
-        Text(text.isEmpty ? "♪" : text)
+        styled
             .font(.system(size: 28, weight: .bold))
             .foregroundStyle(.primary)
             .frame(maxWidth: .infinity, alignment: .leading)

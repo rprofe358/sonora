@@ -333,11 +333,20 @@ fn variant(ceiling: Option<u32>) -> String {
     ceiling.map_or_else(|| "best".to_owned(), |ceiling| ceiling.to_string())
 }
 
+/// The ceiling of `Quality::High`. On a phone it sits just above the best stream any client
+/// serves without a token, so the signed-in Premium stream, which waits for a token minted in a
+/// hidden browser page, is only tried at Lossless or Hi-Res and a track starts sooner.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+const HIGH: Option<u32> = Some(200_000);
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+const HIGH: Option<u32> = None;
+
 /// The bitrate ceiling a level stands for, in bits per second. Each sits between two streams,
 /// since the bitrate YouTube reports runs a little above the nominal one.
 fn ceiling(quality: Quality) -> Option<u32> {
     match quality.within(QUALITIES) {
-        Quality::HiRes | Quality::Lossless | Quality::High => None,
+        Quality::HiRes | Quality::Lossless => None,
+        Quality::High => HIGH,
         Quality::Normal => Some(160_000),
         Quality::Low => Some(64_000),
     }

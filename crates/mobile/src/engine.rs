@@ -30,6 +30,45 @@ pub use scrobble::*;
 pub use session::*;
 pub use settings::*;
 
+/// Cuánto ocupan como mucho las canciones guardadas tras escucharlas: 1 GB.
+const VAULT_BYTES: u64 = 1 << 30;
+
+/// Las canciones ya escuchadas, guardadas cifradas en la caché para que al repetirlas suenen al
+/// instante y sin internet; las más viejas se borran al pasar de [`VAULT_BYTES`]. Su clave vive en
+/// la carpeta privada de la app. Sin clave no guarda nada, y todo suena igual desde internet.
+fn vault() -> Option<Arc<music::vault::Vault>> {
+    use music::vault::{MASTER, Vault};
+    let vault = Arc::new(Vault::standard(VAULT_BYTES));
+    vault.set_caching(true);
+    // Spotify guarda sus propios archivos, dentro del mismo límite
+    Vault::set_keeping(true, VAULT_BYTES);
+    let key = (|| -> anyhow::Result<Vec<u8>> {
+        let path = dirs::data_local_dir()
+            .ok_or_else(|| anyhow::anyhow!("no data folder"))?
+            .join("sonora")
+            .join("vault.key");
+        if let Ok(key) = std::fs::read(&path)
+            && key.len() == MASTER
+        {
+            return Ok(key);
+        }
+        let key = Vault::new_master()?.to_vec();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&path, &key)?;
+        Ok(key)
+    })();
+    match key {
+        Ok(key) => vault.unlock(&key),
+        Err(error) => {
+            log::warn!("vault: no key, nothing is kept: {error:#}");
+            vault.stay_locked();
+        }
+    }
+    Some(vault)
+}
+
 /// El servicio de la música guardada en el teléfono.
 const LOCAL: &str = "local";
 
@@ -176,7 +215,7 @@ impl Engine {
             quality: Quality::High,
             meter: Meter::default(),
             analyzer: Analyzer::default(),
-            vault: None,
+            vault: vault(),
         };
         let providers: Vec<Arc<dyn MusicProvider>> = vec![
             Arc::new(YouTubeProvider::new()),
@@ -618,6 +657,28 @@ impl Engine {
     /// El visualizador ya no se ve: deja de analizar.
     pub fn spectrum_stop(&self) {
         *lock(&self.inner.spectrum) = None;
+    }
+
+    /// Lo que se sugiere mientras se escribe en Buscar. YouTube Music sugiere aunque se busque en
+    /// otro servicio; si no hay sesión de YouTube, lo que sugiera el elegido. Bloquea un poco.
+    pub fn suggestions(&self, slug: String, input: String) -> Vec<String> {
+        let input = input.trim().to_owned();
+        if input.is_empty() {
+            return Vec::new();
+        }
+        let api = self
+            .inner
+            .api("youtube")
+            .or_else(|_| self.inner.api(&slug));
+        let Ok(api) = api else {
+            return Vec::new();
+        };
+        runtime().block_on(async {
+            match tokio::time::timeout(Duration::from_secs(3), api.search_suggestions(&input)).await {
+                Ok(Ok(found)) => found.into_iter().take(8).collect(),
+                _ => Vec::new(),
+            }
+        })
     }
 
     /// Vacía lo que viene después de la canción actual, que sigue sonando.

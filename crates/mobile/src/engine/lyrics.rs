@@ -21,7 +21,7 @@ const GRACE: Duration = Duration::from_millis(900);
 /// Cuántas letras se recuerdan en memoria.
 const REMEMBERED: usize = 300;
 /// Cambia si cambia la forma de lo guardado en disco, para no leer letras viejas.
-const DISK_VERSION: u32 = 1;
+const DISK_VERSION: u32 = 2;
 
 /// Las letras ya buscadas en esta sesión. Cada canción tiene su celda: si dos llamadas piden la
 /// misma (la búsqueda anticipada y la pantalla de la letra), la segunda espera a la primera.
@@ -35,6 +35,17 @@ static DISK: LazyLock<storage::Cache> = LazyLock::new(storage::Cache::standard);
 pub struct LyricLine {
     pub start_ms: u64,
     pub end_ms: Option<u64>,
+    pub text: String,
+    /// Las palabras con sus tiempos, cuando la letra viene palabra por palabra (karaoke). Juntas
+    /// forman `text`, espacios incluidos.
+    #[serde(default)]
+    pub words: Vec<LyricWord>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, uniffi::Record)]
+pub struct LyricWord {
+    pub start_ms: u64,
+    pub end_ms: u64,
     pub text: String,
 }
 
@@ -54,6 +65,8 @@ pub(super) fn providers() -> Vec<Arc<dyn LyricsProvider>> {
     vec![
         // La letra de los archivos del teléfono (.lrc al lado, o en las etiquetas).
         Arc::new(music::local::LocalLyrics),
+        // palabra por palabra, como en BoomingMusic
+        Arc::new(music::betterlyrics::BetterLyrics::new()),
         Arc::new(music::spotify::SpotifyLyrics::from_env()),
         Arc::new(music::youtube::YouTubeLyrics::new()),
         Arc::new(music::binimum::Binimum::new()),
@@ -228,6 +241,16 @@ fn result(hit: LyricsHit) -> LyricsResult {
                     start_ms: line.start.as_millis() as u64,
                     end_ms: line.end.map(|end| end.as_millis() as u64),
                     text: line.text.clone(),
+                    words: line
+                        .words
+                        .iter()
+                        .flatten()
+                        .map(|word| LyricWord {
+                            start_ms: word.start.as_millis() as u64,
+                            end_ms: word.end.as_millis() as u64,
+                            text: word.text.clone(),
+                        })
+                        .collect(),
                 })
                 .collect(),
         ),
@@ -238,6 +261,7 @@ fn result(hit: LyricsHit) -> LyricsResult {
                     start_ms: 0,
                     end_ms: None,
                     text: line.to_owned(),
+                    words: Vec::new(),
                 })
                 .collect(),
         ),

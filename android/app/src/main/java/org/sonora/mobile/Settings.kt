@@ -169,7 +169,7 @@ private fun LocalSection(provider: ProviderInfo) {
     SectionTitle("Música del teléfono")
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
-            "Las canciones descargadas en el teléfono, para escucharlas aquí y ver su letra. Aparecen como «${provider.name}» en Inicio, Buscar y Biblioteca.",
+            "Las canciones descargadas en el teléfono, estén en la carpeta que estén, para escucharlas aquí y ver su letra. Aparecen solas como «${provider.name}» en Inicio, Buscar y Biblioteca.",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -185,17 +185,23 @@ private fun LocalSection(provider: ProviderInfo) {
                     OutlinedButton(onClick = { Store.closeLocal() }) { Text("Quitar") }
                 }
             }
-            else -> Button(onClick = { scan() }, modifier = Modifier.fillMaxWidth()) { Text("Buscar música en el teléfono") }
+            else -> Button(onClick = { scan() }, modifier = Modifier.fillMaxWidth()) {
+                Text(if (Store.canReadMusic()) "Mostrar la música del teléfono" else "Permitir acceso a la música")
+            }
         }
-        Text("Carpetas", style = MaterialTheme.typography.labelLarge)
+        if (Store.localFolders.isNotEmpty()) {
+            Text("Carpetas con música", style = MaterialTheme.typography.labelLarge)
+        }
         Store.localFolders.forEach { path ->
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    path.removePrefix("/storage/emulated/0/").ifEmpty { "Memoria interna" },
+                    path.removePrefix("/storage/emulated/0").removePrefix("/").ifEmpty { "Memoria interna" },
                     style = MaterialTheme.typography.bodySmall,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).padding(vertical = 8.dp),
                 )
-                TextButton(onClick = { Store.removeLocalFolder(path) }) { Text("Quitar") }
+                if (Store.isExtraFolder(path)) {
+                    TextButton(onClick = { Store.removeLocalFolder(path) }) { Text("Quitar") }
+                }
             }
         }
         TextButton(onClick = { runCatching { folder.launch(null) } }) { Text("Agregar carpeta…") }

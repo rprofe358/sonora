@@ -427,6 +427,10 @@ impl MusicApi for YouTubeClient {
         radio::station(&self.api, track_id, from).await
     }
 
+    async fn search_suggestions(&self, query: &str) -> Result<Vec<String>> {
+        self.api.search_suggestions(query).await
+    }
+
     async fn search(&self, query: &str) -> Result<Vec<Track>> {
         Ok(self
             .api
