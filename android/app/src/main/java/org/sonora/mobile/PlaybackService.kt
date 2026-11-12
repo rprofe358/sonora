@@ -4,7 +4,6 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
-import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -15,12 +14,16 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.os.Build
+import android.os.Bundle
 import android.os.IBinder
+import android.support.v4.media.MediaBrowserCompat
+import android.support.v4.media.session.MediaSessionCompat.QueueItem
 import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaSessionCompat
 import android.support.v4.media.session.PlaybackStateCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import androidx.media.MediaBrowserServiceCompat
 import androidx.media.session.MediaButtonReceiver
 import coil3.SingletonImageLoader
 import coil3.request.ImageRequest
@@ -33,9 +36,15 @@ import uniffi.sonora_mobile.Status
 /**
  * Mantiene viva la música con la app cerrada: notificación con controles, pantalla de bloqueo,
  * botones de audífonos y Bluetooth, foco de audio (pausa con llamadas) y pausa al desconectar
- * los audífonos.
+ * los audífonos. También es lo que ve Android Auto: la biblioteca para navegar (ver
+ * [AutoBrowser]), la búsqueda por voz y la cola.
  */
-class PlaybackService : Service() {
+class PlaybackService : MediaBrowserServiceCompat() {
+    private val browser = AutoBrowser()
+    /** Lo arrancó la app (no solo Android Auto al conectarse), así que puede ir en primer plano. */
+    var started = false
+        private set
+    private var queueKey = ""
     private lateinit var media: MediaSessionCompat
     private lateinit var audioManager: AudioManager
     private var focus: AudioFocusRequest? = null
@@ -68,17 +77,23 @@ class PlaybackService : Service() {
                 override fun onSkipToNext() = Store.engine.next()
                 override fun onSkipToPrevious() = Store.engine.previous()
                 override fun onSeekTo(pos: Long) = Store.engine.seek(pos.coerceAtLeast(0).toULong())
+                override fun onSkipToQueueItem(id: Long) = Store.engine.jump(id.toUInt())
+                override fun onPlayFromMediaId(mediaId: String?, extras: Bundle?) {
+                    mediaId?.let { browser.play(it) }
+                }
+                override fun onPlayFromSearch(query: String?, extras: Bundle?) = browser.playSearch(query.orEmpty())
             })
             isActive = true
         }
+        sessionToken = media.sessionToken
         ContextCompat.registerReceiver(
             this, noisy, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY),
             ContextCompat.RECEIVER_NOT_EXPORTED,
         )
-        requestFocus()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        started = true
         if (intent?.action == ACTION_CLOSE) {
             Store.shutdown()
             return START_NOT_STICKY
@@ -88,7 +103,20 @@ class PlaybackService : Service() {
         return START_NOT_STICKY
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onBind(intent: Intent?): IBinder? = super.onBind(intent)
+
+    override fun onGetRoot(clientPackageName: String, clientUid: Int, rootHints: Bundle?): BrowserRoot =
+        BrowserRoot(AutoBrowser.ROOT, Bundle().apply { putBoolean("android.media.browse.SEARCH_SUPPORTED", true) })
+
+    override fun onLoadChildren(parentId: String, result: Result<MutableList<MediaBrowserCompat.MediaItem>>) {
+        result.detach()
+        Store.scope.launch { result.sendResult(browser.children(parentId).toMutableList()) }
+    }
+
+    override fun onSearch(query: String, extras: Bundle?, result: Result<MutableList<MediaBrowserCompat.MediaItem>>) {
+        result.detach()
+        Store.scope.launch { result.sendResult(browser.search(query).toMutableList()) }
+    }
 
     /** Al quitar Sonora de las apps recientes, se cierra del todo. */
     override fun onTaskRemoved(rootIntent: Intent?) {
@@ -105,6 +133,7 @@ class PlaybackService : Service() {
     }
 
     private fun requestFocus() {
+        if (focus != null) return
         val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
             .setAudioAttributes(
                 AudioAttributes.Builder()
@@ -117,6 +146,9 @@ class PlaybackService : Service() {
                     AudioManager.AUDIOFOCUS_LOSS -> {
                         resumeAfterFocus = false
                         Store.engine.pause()
+                        // otra app se quedó con el audio: se vuelve a pedir al reproducir
+                        focus?.let { audioManager.abandonAudioFocusRequest(it) }
+                        focus = null
                     }
                     AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
                         resumeAfterFocus = Store.state?.status == Status.PLAYING
@@ -157,11 +189,14 @@ class PlaybackService : Service() {
         if (track == null) {
             if (foreground) stopForeground(STOP_FOREGROUND_REMOVE)
             foreground = false
+            started = false
             stopSelf()
             return
         }
         if (track.cover != artworkUrl) loadArtwork(track.cover)
         val playing = state.status == Status.PLAYING || state.status == Status.LOADING
+        if (playing && !state.remote) requestFocus()
+        showQueue(state)
 
         media.setMetadata(
             MediaMetadataCompat.Builder()
@@ -178,8 +213,10 @@ class PlaybackService : Service() {
                     PlaybackStateCompat.ACTION_PLAY or PlaybackStateCompat.ACTION_PAUSE or
                         PlaybackStateCompat.ACTION_PLAY_PAUSE or PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
                         PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or PlaybackStateCompat.ACTION_SEEK_TO or
-                        PlaybackStateCompat.ACTION_STOP,
+                        PlaybackStateCompat.ACTION_STOP or PlaybackStateCompat.ACTION_PLAY_FROM_MEDIA_ID or
+                        PlaybackStateCompat.ACTION_PLAY_FROM_SEARCH or PlaybackStateCompat.ACTION_SKIP_TO_QUEUE_ITEM,
                 )
+                .setActiveQueueItemId(state.index.toLong())
                 .setState(
                     if (playing) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
                     state.positionMs.toLong(),
@@ -234,6 +271,16 @@ class PlaybackService : Service() {
             PendingIntent.FLAG_IMMUTABLE,
         )
 
+    /** La cola, para la pantalla del carro. Se vuelve a leer solo cuando cambia. */
+    private fun showQueue(state: PlaybackState) {
+        val key = "${state.provider}/${state.queueLength}/${state.track?.id}"
+        if (key == queueKey) return
+        queueKey = key
+        val queue = runCatching { Store.engine.queue() }.getOrDefault(emptyList())
+        media.setQueue(queue.mapIndexed { index, item -> QueueItem(AutoBrowser.describe(item), index.toLong()) })
+        media.setQueueTitle("Cola")
+    }
+
     private fun button(action: Long) = MediaButtonReceiver.buildMediaButtonPendingIntent(this, action)
 
     private fun loadArtwork(url: String?) {
@@ -259,7 +306,8 @@ class PlaybackService : Service() {
         /** Arranca el servicio al empezar a sonar algo y lo mantiene al día. */
         fun update(context: Context, state: PlaybackState) {
             val running = instance
-            if (running != null) {
+            val playing = state.track != null && (state.status == Status.PLAYING || state.status == Status.LOADING)
+            if (running != null && (running.started || !playing)) {
                 running.show(state)
                 return
             }

@@ -74,6 +74,8 @@ object Store : EngineListener {
     fun refresh() {
         providers = engine.providers()
         if (signedIn.none { it.slug == selected }) signedIn.firstOrNull()?.let { selected = it.slug }
+        // Android Auto vuelve a leer la lista de servicios
+        PlaybackService.instance?.notifyChildrenChanged(AutoBrowser.ROOT)
     }
 
     /** Corre algo que bloquea al motor fuera del hilo principal. */
