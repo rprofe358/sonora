@@ -339,7 +339,7 @@ struct PlayerBarModifier: ViewModifier {
                     PlayerBar(track: track, state: store.state) { open = true }
                 }
             }
-            .sheet(isPresented: $open) {
+            .fullScreenCover(isPresented: $open) {
                 PlayerView().environmentObject(store)
             }
     }
@@ -409,113 +409,5 @@ struct PlayButton: View {
             .frame(width: size * 1.6, height: size * 1.6)
         }
         .buttonStyle(.plain)
-    }
-}
-
-struct PlayerView: View {
-    @EnvironmentObject private var store: Store
-    @Environment(\.dismiss) private var dismiss
-    @State private var scrub: Double?
-    @State private var volume: Double = 1
-    @State private var showQueue = false
-    @State private var showLyrics = false
-
-    var body: some View {
-        let state = store.state
-        VStack(spacing: 24) {
-            Capsule().fill(.secondary.opacity(0.4)).frame(width: 40, height: 5).padding(.top, 8)
-            Spacer(minLength: 0)
-            Cover(url: state.track?.cover, size: 300)
-                .shadow(radius: 12, y: 6)
-            VStack(spacing: 4) {
-                Text(state.track?.title ?? "")
-                    .font(.title3.weight(.semibold))
-                    .multilineTextAlignment(.center)
-                Text(state.track?.artists ?? "")
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.horizontal)
-
-            VStack(spacing: 4) {
-                Slider(
-                    value: Binding(
-                        get: { scrub ?? Double(state.positionMs) },
-                        set: { scrub = $0 }
-                    ),
-                    in: 0...max(1, Double(state.durationMs))
-                ) { editing in
-                    if !editing, let target = scrub {
-                        store.engine.seek(positionMs: UInt64(target))
-                        scrub = nil
-                    }
-                }
-                HStack {
-                    Text(clock(UInt64(scrub ?? Double(state.positionMs))))
-                    Spacer()
-                    Text(clock(state.durationMs))
-                }
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 24)
-
-            HStack(spacing: 44) {
-                Button { store.engine.previous() } label: {
-                    Image(systemName: "backward.fill").font(.system(size: 30))
-                }
-                PlayButton(status: state.status, size: 44) { store.engine.toggle() }
-                Button { store.engine.next() } label: {
-                    Image(systemName: "forward.fill").font(.system(size: 30))
-                }
-                .disabled(state.index + 1 >= state.queueLength)
-            }
-            .buttonStyle(.plain)
-
-            if state.remote {
-                Label("Controlas la sesión: esto suena en los otros dispositivos.", systemImage: "slider.horizontal.3")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 24)
-            } else {
-                HStack {
-                    Image(systemName: "speaker.fill").foregroundStyle(.secondary)
-                    Slider(value: $volume, in: 0...1) { editing in
-                        if !editing { store.engine.setVolume(level: Float(volume)) }
-                    }
-                    Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
-                }
-                .padding(.horizontal, 24)
-            }
-
-            HStack(spacing: 28) {
-                Button {
-                    showLyrics = true
-                } label: {
-                    Label("Letra", systemImage: "quote.bubble")
-                }
-                Button {
-                    showQueue = true
-                } label: {
-                    Label("Cola · \(state.index + 1) de \(state.queueLength)", systemImage: "list.bullet")
-                }
-            }
-            .font(.footnote)
-            Text(providerName(state.provider))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
-        }
-        .onAppear { volume = Double(state.volume) }
-        .sheet(isPresented: $showQueue) {
-            QueueView().environmentObject(store)
-        }
-        .sheet(isPresented: $showLyrics) {
-            LyricsView().environmentObject(store)
-        }
-    }
-
-    private func providerName(_ slug: String?) -> String {
-        store.providers.first(where: { $0.slug == slug })?.name ?? ""
     }
 }

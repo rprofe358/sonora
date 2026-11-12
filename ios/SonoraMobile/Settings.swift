@@ -250,6 +250,7 @@ struct PlaylistPicker: View {
                     ForEach(own, id: \.id) { playlist in
                         Button {
                             store.addToPlaylist(playlist, adding: adding)
+                            dismiss()
                         } label: {
                             HStack(spacing: 12) {
                                 Cover(url: playlist.cover, size: 44)

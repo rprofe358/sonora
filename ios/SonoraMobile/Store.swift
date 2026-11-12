@@ -331,9 +331,9 @@ final class Store: ObservableObject {
         }
     }
 
-    func startSession() {
+    func startSession(from slug: String? = nil) {
         sessionBusy = true
-        let slug = selected
+        let slug = slug ?? selected
         Task {
             if case .failure(let error) = await run({ try $0.sessionStart(slug: slug) }) {
                 problem = describe(error)

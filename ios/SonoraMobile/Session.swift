@@ -3,21 +3,30 @@ import SwiftUI
 /// Sonora Session: escuchar lo mismo a la vez que otras apps de Sonora, como la del PC, o
 /// controlarlas desde aquí sin que suene el iPhone.
 struct SessionView: View {
+    var body: some View {
+        RoutedStack {
+            SessionList()
+                .navigationTitle("Sesión")
+                .withPlayerBar()
+        }
+    }
+}
+
+/// Unirse, iniciar o ver la sesión en curso. También se muestra en el reproductor, donde
+/// `slug` es el servicio de lo que suena.
+struct SessionList: View {
     @EnvironmentObject private var store: Store
+    var slug: String? = nil
     @State private var code = ""
     @State private var remote = false
 
     var body: some View {
-        RoutedStack {
-            List {
-                if let session = store.session {
-                    inSession(session)
-                } else {
-                    outside
-                }
+        List {
+            if let session = store.session {
+                inSession(session)
+            } else {
+                outside
             }
-            .navigationTitle("Sesión")
-            .withPlayerBar()
         }
     }
 
@@ -40,8 +49,9 @@ struct SessionView: View {
             Text("Con «Solo controlar» el iPhone es un control remoto: lo que pongas, pauses o adelantes aquí suena en el PC.")
         }
         Section {
-            Button("Iniciar una sesión en \(providerName(store.selected))") { store.startSession() }
-                .disabled(store.signedIn.isEmpty || store.sessionBusy)
+            let from = slug ?? store.selected
+            Button("Iniciar una sesión en \(providerName(from))") { store.startSession(from: from) }
+                .disabled(!store.signedIn.contains(where: { $0.slug == from }) || store.sessionBusy)
         } header: {
             Text("Iniciar")
         } footer: {
