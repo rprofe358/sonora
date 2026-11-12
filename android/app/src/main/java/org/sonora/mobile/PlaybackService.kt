@@ -272,6 +272,8 @@ class PlaybackService : Service() {
 
 /** Algunos servicios dan direcciones sin esquema o http; Android prefiere https. */
 fun fixUrl(url: String): String = when {
+    // portadas de las canciones del teléfono: una ruta, que Coil abre como archivo
+    url.startsWith("file://") -> url.removePrefix("file://")
     url.startsWith("//") -> "https:$url"
     url.startsWith("http://") -> "https://" + url.removePrefix("http://")
     else -> url

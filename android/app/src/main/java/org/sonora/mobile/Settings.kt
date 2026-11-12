@@ -3,6 +3,9 @@
 package org.sonora.mobile
 
 import android.content.Intent
+import android.provider.DocumentsContract
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import android.net.Uri
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -107,6 +110,10 @@ fun SettingsScreen() {
 
 @Composable
 private fun ProviderSection(provider: ProviderInfo) {
+    if (provider.slug == "local") {
+        LocalSection(provider)
+        return
+    }
     SectionTitle(provider.name)
     Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         val account = if (provider.signedIn) remember(provider) { Store.engine.account(provider.slug) } else null
@@ -141,6 +148,67 @@ private fun ProviderSection(provider: ProviderInfo) {
         }
         note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
+}
+
+/** Las canciones guardadas en el teléfono: se buscan en Música, Descargas y otras carpetas. */
+@Composable
+private fun LocalSection(provider: ProviderInfo) {
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) Store.openLocal()
+        else Store.problem = "Sin el permiso de música, Sonora no puede ver las canciones del teléfono."
+    }
+    val folder = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        val path = uri?.let { folderPath(it) }
+        if (uri != null && path == null) Store.problem = "No pude abrir esa carpeta. Prueba con una de la memoria del teléfono."
+        path?.let { Store.addLocalFolder(it) }
+    }
+    fun scan() {
+        if (Store.canReadMusic()) Store.openLocal() else permission.launch(Store.musicPermission)
+    }
+
+    SectionTitle("Música del teléfono")
+    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            "Las canciones descargadas en el teléfono, para escucharlas aquí y ver su letra. Aparecen como «${provider.name}» en Inicio, Buscar y Biblioteca.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        when {
+            Store.localBusy -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CircularProgressIndicator(Modifier.size(24.dp))
+                Text("Buscando canciones…")
+            }
+            provider.signedIn -> {
+                Text("Listo: tus canciones ya están en la app.")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = { scan() }) { Text("Volver a buscar") }
+                    OutlinedButton(onClick = { Store.closeLocal() }) { Text("Quitar") }
+                }
+            }
+            else -> Button(onClick = { scan() }, modifier = Modifier.fillMaxWidth()) { Text("Buscar música en el teléfono") }
+        }
+        Text("Carpetas", style = MaterialTheme.typography.labelLarge)
+        Store.localFolders.forEach { path ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    path.removePrefix("/storage/emulated/0/").ifEmpty { "Memoria interna" },
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = { Store.removeLocalFolder(path) }) { Text("Quitar") }
+            }
+        }
+        TextButton(onClick = { runCatching { folder.launch(null) } }) { Text("Agregar carpeta…") }
+    }
+}
+
+/** La ruta de una carpeta elegida en el selector de Android (`primary:Music/Rock` → ruta). */
+private fun folderPath(uri: Uri): String? {
+    val id = runCatching { DocumentsContract.getTreeDocumentId(uri) }.getOrNull() ?: return null
+    val volume = id.substringBefore(":")
+    val inside = id.substringAfter(":", "")
+    val root = if (volume.equals("primary", ignoreCase = true)) "/storage/emulated/0" else "/storage/$volume"
+    return if (inside.isEmpty()) root else "$root/$inside"
 }
 
 private fun label(method: SignInMethod, provider: ProviderInfo) = when (method) {

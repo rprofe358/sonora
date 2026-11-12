@@ -1,6 +1,14 @@
 package org.sonora.mobile
 
+import android.app.Activity
 import android.os.Build
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalView
+import androidx.core.view.WindowCompat
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -143,6 +151,43 @@ private fun playerColors(content: Color, light: Boolean) = darkColorScheme(
     outline = content.copy(alpha = 0.5f),
 )
 
+/**
+ * En TV y tablet el reproductor va en una ventana aparte, que se queda con el foco del control.
+ * En el teléfono va encima de la app, en la misma ventana, para respetar las barras del sistema
+ * (en una ventana aparte, los botones de abajo quedaban tapados).
+ */
+@Composable
+private fun Shell(wide: Boolean, onClose: () -> Unit, content: @Composable () -> Unit) {
+    if (wide) {
+        Dialog(
+            onDismissRequest = onClose,
+            properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+        ) { content() }
+    } else {
+        BackHandler(onBack = onClose)
+        // se queda con los toques, para que no lleguen a la pantalla de abajo
+        Box(Modifier.fillMaxSize().pointerInput(Unit) { detectTapGestures { } }) { content() }
+    }
+}
+
+/** Iconos de la barra de estado oscuros sobre portadas claras, y claros sobre las oscuras. */
+@Composable
+private fun StatusBarIcons(dark: Boolean) {
+    val view = LocalView.current
+    DisposableEffect(dark) {
+        val window = (view.context as? Activity)?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, view) }
+        val status = controller?.isAppearanceLightStatusBars
+        val navigation = controller?.isAppearanceLightNavigationBars
+        controller?.isAppearanceLightStatusBars = dark
+        controller?.isAppearanceLightNavigationBars = dark
+        onDispose {
+            status?.let { controller?.isAppearanceLightStatusBars = it }
+            navigation?.let { controller?.isAppearanceLightNavigationBars = it }
+        }
+    }
+}
+
 /** Saca de la portada el color dominante (con Palette) y decide si el texto va claro u oscuro. */
 @Composable
 private fun rememberTint(cover: String?): Tint {
@@ -178,11 +223,9 @@ fun PlayerScreen(onClose: () -> Unit) {
     var adding by remember { mutableStateOf(false) }
     val play = remember { FocusRequester() }
 
-    Dialog(
-        onDismissRequest = onClose,
-        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
-    ) {
+    Shell(wide, onClose) {
         val tint = rememberTint(Store.state?.track?.cover)
+        if (!wide) StatusBarIcons(dark = tint.light)
         val content by animateColorAsState(if (tint.light) ink else Color.White, tween(600), label = "content")
         MaterialTheme(colorScheme = playerColors(content, tint.light)) {
           CompositionLocalProvider(LocalContentColor provides content) {
@@ -321,8 +364,19 @@ private fun Info(track: TrackItem, slug: String, centered: Boolean) {
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        IconButton(onClick = { Store.save(SavedKind.TRACK, track.id, slug) }) {
-            Icon(Icons.Filled.FavoriteBorder, "Guardar en tu biblioteca")
+        // el motor avisa con un estado nuevo cuando termina de cargar las guardadas
+        val tick = Store.state
+        var mine by remember(track.id) { mutableStateOf<Boolean?>(null) }
+        val known = remember(track.id, slug, tick) { Store.engine.trackSaved(slug, track.id) }
+        val saved = mine ?: known
+        IconButton(onClick = {
+            mine = !saved
+            Store.save(SavedKind.TRACK, track.id, slug, saved = !saved, quiet = true)
+        }) {
+            Icon(
+                if (saved) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
+                if (saved) "Quitar de tu biblioteca" else "Guardar en tu biblioteca",
+            )
         }
     }
 }

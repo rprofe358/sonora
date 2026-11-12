@@ -20,6 +20,7 @@ music.workspace = true
 rustls.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+storage.workspace = true
 tokio.workspace = true
 # Las raíces de certificados del sistema no se leen en iOS; se usan las de webpki.
 tokio-tungstenite = { workspace = true, features = ["rustls-tls-webpki-roots"] }

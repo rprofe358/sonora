@@ -67,6 +67,7 @@ object Store : EngineListener {
         audio = saved ?: engine.audioSettings()
         refresh()
         restoreStored()
+        if (preferences.getBoolean("local.on", false) && canReadMusic()) openLocal(quiet = true)
         minter.start()
     }
 
@@ -151,9 +152,11 @@ object Store : EngineListener {
             .onFailure { problem = describe(it) }
     }
 
-    fun save(kind: SavedKind, id: String, slug: String, saved: Boolean = true) = launch {
+    fun save(kind: SavedKind, id: String, slug: String, saved: Boolean = true, quiet: Boolean = false) = launch {
         run { it.setSaved(slug, kind, id, saved) }
-            .onSuccess { problem = if (saved) "Guardado en tu biblioteca." else "Quitado de tu biblioteca." }
+            .onSuccess {
+                if (!quiet) problem = if (saved) "Guardado en tu biblioteca." else "Quitado de tu biblioteca."
+            }
             .onFailure { problem = describe(it) }
     }
 
@@ -227,6 +230,54 @@ object Store : EngineListener {
             it.stopSelf()
         }
         main.postDelayed({ android.os.Process.killProcess(android.os.Process.myPid()) }, 300)
+    }
+
+    // ── Canciones del teléfono ─────────────────────────────────────────────────────────────
+
+    var localBusy by mutableStateOf(false)
+
+    /** El permiso para leer la música del teléfono (cambia de nombre en Android 13). */
+    val musicPermission: String
+        get() = if (android.os.Build.VERSION.SDK_INT >= 33) android.Manifest.permission.READ_MEDIA_AUDIO
+        else android.Manifest.permission.READ_EXTERNAL_STORAGE
+
+    fun canReadMusic() = androidx.core.content.ContextCompat.checkSelfPermission(app, musicPermission) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    /** Las carpetas donde buscar: Música y Descargas, más las que se agreguen. */
+    val localFolders: List<String>
+        get() = preferences.getStringSet("local.folders", null)?.sorted() ?: listOf(
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_MUSIC).path,
+            android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS).path,
+        )
+
+    fun addLocalFolder(path: String) {
+        preferences.edit().putStringSet("local.folders", (localFolders + path).toSet()).apply()
+        openLocal()
+    }
+
+    fun removeLocalFolder(path: String) {
+        preferences.edit().putStringSet("local.folders", (localFolders - path).toSet()).apply()
+        if (localFolders.isEmpty()) closeLocal() else openLocal()
+    }
+
+    /** Busca (o vuelve a buscar) las canciones del teléfono. */
+    fun openLocal(quiet: Boolean = false) {
+        localBusy = true
+        val folders = localFolders
+        launch {
+            run { it.openLocal(folders) }
+                .onSuccess { preferences.edit().putBoolean("local.on", true).apply() }
+                .onFailure { if (!quiet) problem = describe(it) }
+            localBusy = false
+            libraryRevision++
+            refresh()
+        }
+    }
+
+    fun closeLocal() {
+        preferences.edit().putBoolean("local.on", false).apply()
+        signOut("local")
     }
 
     // ── Scrobbling ─────────────────────────────────────────────────────────────────────────

@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 extension TrackItem: Identifiable {}
 
@@ -237,6 +238,8 @@ actor ImagePipeline {
     /// iOS solo deja cargar por https, y algunos servicios dan direcciones sin esquema o http.
     private static func normalized(_ url: String) -> URL? {
         var text = url.trimmingCharacters(in: .whitespaces)
+        // portadas de las canciones del iPhone
+        if text.hasPrefix("file://") { return URL(fileURLWithPath: String(text.dropFirst("file://".count))) }
         if text.hasPrefix("//") { text = "https:" + text }
         if text.hasPrefix("http://") { text = "https://" + text.dropFirst("http://".count) }
         return URL(string: text)
@@ -252,7 +255,7 @@ struct AccountsView: View {
     var body: some View {
         NavigationStack {
             List {
-                ForEach(store.providers, id: \.slug) { provider in
+                ForEach(store.providers.filter { $0.slug != "local" }, id: \.slug) { provider in
                     Section {
                         rows(for: provider)
                     } header: {
@@ -264,6 +267,9 @@ struct AccountsView: View {
                             Text("Sin cuenta puedes buscar y escuchar; con tu cuenta de Google ves tu biblioteca y tus playlists.")
                         }
                     }
+                }
+                if let local = store.providers.first(where: { $0.slug == "local" }) {
+                    LocalSection(provider: local)
                 }
                 Section("Ajustes") {
                     NavigationLink {
@@ -317,6 +323,42 @@ struct AccountsView: View {
         case .anonymous: return "Usar sin cuenta (invitado)"
         case .secret: return "Iniciar sesión con Google"
         default: return "Iniciar sesión en \(provider.name)"
+        }
+    }
+}
+
+/// Las canciones guardadas en el iPhone, en la carpeta de Sonora de la app Archivos.
+struct LocalSection: View {
+    @EnvironmentObject private var store: Store
+    let provider: ProviderInfo
+    @State private var importing = false
+
+    var body: some View {
+        Section {
+            if store.localBusy {
+                HStack(spacing: 12) {
+                    ProgressView()
+                    Text("Buscando canciones…")
+                }
+            } else if provider.signedIn {
+                Label("Tus canciones ya están en la app", systemImage: "checkmark.circle")
+                Button("Volver a buscar") { store.openLocal() }
+                Button("Quitar", role: .destructive) { store.closeLocal() }
+            } else {
+                Button("Buscar canciones en la carpeta de Sonora") { store.openLocal() }
+            }
+            Button {
+                importing = true
+            } label: {
+                Label("Importar canciones desde Archivos…", systemImage: "square.and.arrow.down")
+            }
+        } header: {
+            Text("Música del iPhone")
+        } footer: {
+            Text("También puedes copiar música a «En mi iPhone › Sonora» en la app Archivos (o desde el PC con iTunes) y tocar «Volver a buscar». Aparece como «\(provider.name)» en Inicio, Buscar y Biblioteca, con su letra.")
+        }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
+            if case .success(let urls) = result { store.importSongs(urls) }
         }
     }
 }

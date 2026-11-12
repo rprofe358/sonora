@@ -6,7 +6,7 @@ use std::future::Future;
 
 use music::{Album, GenreItem, Playlist, ReleaseType, SavedArtist};
 
-use super::{Engine, TrackItem, item};
+use super::{Engine, TrackItem, item, lock};
 use crate::{MobileError, failed, runtime};
 
 #[derive(Clone, Debug, PartialEq, uniffi::Record)]
@@ -329,6 +329,36 @@ impl Engine {
         block(async { api.remove_track_from_playlist(&playlist, &track).await })
     }
 
+    /// Si una canción está entre las guardadas de la cuenta, para el corazón del reproductor.
+    /// La primera vez carga la lista en segundo plano y responde `false`; al terminar avisa con
+    /// un estado nuevo (`on_state`) para que la app vuelva a preguntar.
+    pub fn track_saved(&self, slug: String, id: String) -> bool {
+        let mut liked = lock(&self.inner.liked);
+        match liked.get(&slug) {
+            Some(Some(ids)) => return ids.contains(&id),
+            Some(None) => return false,
+            None => {}
+        }
+        let Ok(api) = self.inner.api(&slug) else {
+            return false;
+        };
+        liked.insert(slug.clone(), None);
+        drop(liked);
+        let inner = self.inner.clone();
+        runtime().spawn(async move {
+            let ids = match api.saved_tracks().await {
+                Ok(tracks) => tracks.into_iter().filter_map(|track| track.id).collect(),
+                Err(error) => {
+                    log::warn!("library: cannot load saved tracks: {error:#}");
+                    Default::default()
+                }
+            };
+            lock(&inner.liked).insert(slug, Some(ids));
+            inner.listener.on_state(inner.state());
+        });
+        false
+    }
+
     /// Guarda algo en la biblioteca del servicio, o lo quita.
     pub fn set_saved(
         &self,
@@ -338,6 +368,14 @@ impl Engine {
         saved: bool,
     ) -> Result<(), MobileError> {
         let api = self.inner.api(&slug)?;
+        if kind == SavedKind::Track
+            && let Some(Some(ids)) = lock(&self.inner.liked).get_mut(&slug)
+        {
+            match saved {
+                true => ids.insert(id.clone()),
+                false => ids.remove(&id),
+            };
+        }
         block(async {
             match (kind, saved) {
                 (SavedKind::Track, _) => api.set_track_saved(&id, saved).await,

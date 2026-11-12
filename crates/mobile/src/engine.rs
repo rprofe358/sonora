@@ -30,6 +30,9 @@ pub use scrobble::*;
 pub use session::*;
 pub use settings::*;
 
+/// El servicio de la música guardada en el teléfono.
+const LOCAL: &str = "local";
+
 /// Cada cuánto informa el motor de la posición.
 const POSITION_INTERVAL: Duration = Duration::from_millis(500);
 /// Pasados estos segundos, "anterior" vuelve al principio de la canción en vez de retroceder.
@@ -176,6 +179,14 @@ impl Engine {
         let providers: Vec<Arc<dyn MusicProvider>> = vec![
             Arc::new(YouTubeProvider::new()),
             Arc::new(SpotifyProvider::from_env()),
+            // La música guardada en el teléfono; se abre con `open_local`.
+            Arc::new(music::local::LocalProvider::new(
+                dirs::cache_dir()
+                    .unwrap_or_else(std::env::temp_dir)
+                    .join("sonora"),
+                storage::Database::standard(),
+                storage::Cache::standard(),
+            )),
         ];
         Arc::new(Self {
             inner: Arc::new(Inner {
@@ -194,6 +205,7 @@ impl Engine {
                 listening: Mutex::default(),
                 scrobbler: Mutex::default(),
                 scrobble_cancel: Arc::default(),
+                liked: Mutex::default(),
             }),
         })
     }
@@ -205,7 +217,10 @@ impl Engine {
             .iter()
             .map(|provider| ProviderInfo {
                 slug: provider.slug().to_owned(),
-                name: provider.name().to_owned(),
+                name: match provider.slug() {
+                    LOCAL => "Descargadas".to_owned(),
+                    _ => provider.name().to_owned(),
+                },
                 stored: provider.stored(),
                 signed_in: sessions.contains_key(provider.slug()),
                 methods: provider
@@ -288,6 +303,29 @@ impl Engine {
         Ok(self.inner.keep(&slug, session))
     }
 
+    /// Busca la música guardada en estas carpetas del teléfono (y sus subcarpetas) y la deja
+    /// como el servicio `local`, con biblioteca, búsqueda y letras. Volver a llamarla vuelve a
+    /// buscar. Bloquea: llamar fuera del hilo principal.
+    pub fn open_local(&self, folders: Vec<String>) -> Result<Account, MobileError> {
+        let provider = self.inner.provider(LOCAL)?;
+        let paths = folders
+            .into_iter()
+            .map(std::path::PathBuf::from)
+            .filter(|path| path.is_dir())
+            .collect::<Vec<_>>();
+        if paths.is_empty() {
+            return Err(MobileError::Failed {
+                message: "No encontré ninguna de esas carpetas en el teléfono.".to_owned(),
+            });
+        }
+        let sink: music::PromptSink = Arc::new(|_| {});
+        let (_sender, receiver) = unbounded_channel();
+        let session = runtime()
+            .block_on(async { provider.sign_in(SignIn::Path(paths), sink, receiver).await })
+            .map_err(failed)?;
+        Ok(self.inner.keep(LOCAL, session))
+    }
+
     /// Responde a un `Prompt` (las cookies, o el id de la cuenta elegida).
     pub fn send_input(&self, text: String) {
         if let Some(sender) = lock(&self.inner.input).as_ref() {
@@ -311,6 +349,7 @@ impl Engine {
             self.inner.stop();
         }
         lock(&self.inner.sessions).remove(&slug);
+        lock(&self.inner.liked).remove(&slug);
         if let Ok(provider) = self.inner.provider(&slug) {
             provider.sign_out();
         }
@@ -664,6 +703,9 @@ struct Inner {
     scrobbler: Mutex<scrobble::Scrobbler>,
     /// Corta una vinculación de scrobbling que espera la aprobación en el navegador.
     scrobble_cancel: Arc<tokio::sync::Notify>,
+    /// Las canciones guardadas de cada cuenta, para el corazón del reproductor. `None` mientras
+    /// se cargan.
+    liked: Mutex<HashMap<String, Option<std::collections::HashSet<String>>>>,
 }
 
 impl Inner {
@@ -687,6 +729,7 @@ impl Inner {
     /// Guarda una sesión nueva. Si reemplaza a la que está sonando, el reproductor viejo se
     /// descarta para que el siguiente salga de la sesión nueva.
     fn keep(&self, slug: &str, session: ProviderSession) -> Account {
+        lock(&self.liked).remove(slug);
         let account = Account {
             slug: slug.to_owned(),
             id: session.profile.id,

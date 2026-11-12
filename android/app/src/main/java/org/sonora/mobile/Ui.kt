@@ -3,6 +3,11 @@
 package org.sonora.mobile
 
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import android.app.UiModeManager
@@ -166,6 +171,7 @@ fun SonoraRoot() {
     }
 
     CompositionLocalProvider(LocalNav provides nav, LocalTv provides tv, LocalWide provides wide) {
+      Box(Modifier.fillMaxSize()) {
         if (wide) {
             // Al abrir con el control remoto, el foco empieza en el menú.
             val first = remember { FocusRequester() }
@@ -215,7 +221,11 @@ fun SonoraRoot() {
             }
         }
 
-        if (player) {
+        AnimatedVisibility(
+            visible = player,
+            enter = slideInVertically { it } + fadeIn(),
+            exit = slideOutVertically { it } + fadeOut(),
+        ) {
             PlayerScreen { player = false }
         }
         Store.prompt?.let { PromptDialog(it) }
@@ -227,6 +237,7 @@ fun SonoraRoot() {
                 confirmButton = { TextButton(onClick = { Store.problem = null }) { Text("Aceptar") } },
             )
         }
+      }
     }
 }
 

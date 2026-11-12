@@ -22,6 +22,9 @@ targets:
         CFBundleDisplayName: Sonora
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
+        # La carpeta de Sonora aparece en la app Archivos, para copiar ahí la música.
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     settings:
       base:

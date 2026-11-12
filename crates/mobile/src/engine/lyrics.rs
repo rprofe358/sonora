@@ -34,6 +34,8 @@ pub struct LyricsResult {
 /// Los servicios de letras que tiene la app de escritorio, salvo los de archivos locales.
 pub(super) fn providers() -> Vec<Arc<dyn LyricsProvider>> {
     vec![
+        // La letra de los archivos del teléfono (.lrc al lado, o en las etiquetas).
+        Arc::new(music::local::LocalLyrics),
         Arc::new(music::spotify::SpotifyLyrics::from_env()),
         Arc::new(music::youtube::YouTubeLyrics::new()),
         Arc::new(music::binimum::Binimum::new()),

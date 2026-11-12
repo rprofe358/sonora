@@ -73,6 +73,7 @@ final class Store: ObservableObject {
         minter.start()
         refresh()
         restoreStored()
+        if UserDefaults.standard.bool(forKey: "local.on") { openLocal(quiet: true) }
     }
 
     var signedIn: [ProviderInfo] { providers.filter(\.signedIn) }
@@ -85,6 +86,60 @@ final class Store: ObservableObject {
     }
 
     func account(_ slug: String) -> Account? { engine.account(slug: slug) }
+
+    // MARK: Canciones del iPhone
+
+    @Published var localBusy = false
+
+    /// La carpeta de Sonora en Archivos («En mi iPhone › Sonora»): ahí va la música.
+    static var musicFolder: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+
+    /// Busca (o vuelve a buscar) las canciones de la carpeta de Sonora.
+    func openLocal(quiet: Bool = false) {
+        localBusy = true
+        let engine = self.engine
+        let folder = Self.musicFolder.path
+        Task {
+            let result = await Task.detached { Result(catching: { try engine.openLocal(folders: [folder]) }) }.value
+            switch result {
+            case .success:
+                UserDefaults.standard.set(true, forKey: "local.on")
+            case .failure(let error):
+                if !quiet { problem = describe(error) }
+            }
+            localBusy = false
+            libraryRevision += 1
+            refresh()
+        }
+    }
+
+    func closeLocal() {
+        UserDefaults.standard.set(false, forKey: "local.on")
+        signOut("local")
+    }
+
+    /// Copia a la carpeta de Sonora los archivos elegidos en Archivos y vuelve a buscar.
+    func importSongs(_ urls: [URL]) {
+        let folder = Self.musicFolder
+        var failed = 0
+        for url in urls {
+            let access = url.startAccessingSecurityScopedResource()
+            defer { if access { url.stopAccessingSecurityScopedResource() } }
+            let target = folder.appendingPathComponent(url.lastPathComponent)
+            do {
+                if FileManager.default.fileExists(atPath: target.path) {
+                    try FileManager.default.removeItem(at: target)
+                }
+                try FileManager.default.copyItem(at: url, to: target)
+            } catch {
+                failed += 1
+            }
+        }
+        if failed > 0 { problem = "No pude copiar \(failed) de los archivos." }
+        openLocal()
+    }
 
     /// Recupera las sesiones guardadas al abrir la app.
     private func restoreStored() {
@@ -199,11 +254,11 @@ final class Store: ObservableObject {
         }
     }
 
-    func save(_ kind: SavedKind, id: String, from slug: String, saved: Bool = true) {
+    func save(_ kind: SavedKind, id: String, from slug: String, saved: Bool = true, quiet: Bool = false) {
         Task {
             switch await run({ try $0.setSaved(slug: slug, kind: kind, id: id, saved: saved) }) {
             case .success:
-                problem = saved ? "Guardado en tu biblioteca." : "Quitado de tu biblioteca."
+                if !quiet { problem = saved ? "Guardado en tu biblioteca." : "Quitado de tu biblioteca." }
             case .failure(let error):
                 problem = describe(error)
             }

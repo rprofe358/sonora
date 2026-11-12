@@ -19,6 +19,8 @@ struct PlayerView: View {
     @State private var drag: CGFloat = 0
     /// La portada es clara: texto e iconos casi negros en vez de blancos.
     @State private var light = false
+    /// Lo que se tocó en el corazón, mientras el servicio lo confirma.
+    @State private var hearted: [String: Bool] = [:]
 
     private var fg: Color { light ? Color(white: 0.08) : .white }
 
@@ -156,11 +158,16 @@ struct PlayerView: View {
                     .lineLimit(1)
             }
             Spacer()
+            // el motor avisa con un estado nuevo cuando termina de cargar las guardadas
+            let saved = hearted[track.id] ?? store.engine.trackSaved(slug: slug, id: track.id)
             Button {
-                store.save(.track, id: track.id, from: slug)
+                hearted[track.id] = !saved
+                store.save(.track, id: track.id, from: slug, saved: !saved, quiet: true)
             } label: {
-                Image(systemName: "heart").font(.title3)
+                Image(systemName: saved ? "heart.fill" : "heart")
+                    .font(.title3)
             }
+            .accessibilityLabel(saved ? "Quitar de tu biblioteca" : "Guardar en tu biblioteca")
         }
         .foregroundStyle(fg)
     }
