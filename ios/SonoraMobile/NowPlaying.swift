@@ -94,11 +94,9 @@ final class NowPlaying {
     private func loadArtwork(_ cover: String?) {
         artworkURL = cover
         artwork = nil
-        guard let cover, let url = URL(string: cover) else { return }
+        guard let cover else { return }
         Task {
-            guard let (data, _) = try? await URLSession.shared.data(from: url),
-                  let image = UIImage(data: data),
-                  self.artworkURL == cover
+            guard let image = await ImagePipeline.shared.image(cover), self.artworkURL == cover
             else { return }
             let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in image }
             self.artwork = artwork

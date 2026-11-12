@@ -19,8 +19,10 @@ use tokio::task::JoinHandle;
 use crate::{MobileError, failed, runtime};
 
 mod library;
+mod lyrics;
 
 pub use library::*;
+pub use lyrics::*;
 
 /// Cada cuánto informa el motor de la posición.
 const POSITION_INTERVAL: Duration = Duration::from_millis(500);
@@ -178,6 +180,7 @@ impl Engine {
                 level: Mutex::new(1.),
                 equalizer: Mutex::new(writer),
                 config: Mutex::new(config),
+                lyrics: lyrics::providers(),
             }),
         })
     }
@@ -518,6 +521,7 @@ struct Inner {
     #[allow(dead_code)]
     equalizer: Mutex<EqualizerWriter>,
     config: Mutex<PlaybackConfig>,
+    lyrics: Vec<Arc<dyn music::LyricsProvider>>,
 }
 
 impl Inner {

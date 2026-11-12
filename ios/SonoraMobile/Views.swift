@@ -161,18 +161,78 @@ struct Cover: View {
     let url: String?
     let size: CGFloat
     var round = false
+    @State private var image: UIImage?
 
     var body: some View {
-        AsyncImage(url: url.flatMap(URL.init(string:))) { image in
-            image.resizable().scaledToFill()
-        } placeholder: {
-            ZStack {
+        ZStack {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
                 Color.secondary.opacity(0.15)
                 Image(systemName: round ? "music.mic" : "music.note").foregroundStyle(.secondary)
             }
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: round ? size / 2 : size * 0.08))
+        .task(id: url) {
+            image = url.flatMap { ImagePipeline.shared.cached($0) }
+            guard image == nil, let url else { return }
+            image = await ImagePipeline.shared.image(url)
+        }
+    }
+}
+
+/// Descarga y guarda en memoria las portadas. A diferencia de `AsyncImage`, una descarga que
+/// empezó termina aunque la fila salga de la pantalla, y se reintenta si falla.
+/// Las portadas ya descargadas. NSCache se puede leer desde cualquier hilo.
+private let coverCache: NSCache<NSString, UIImage> = {
+    let cache = NSCache<NSString, UIImage>()
+    cache.countLimit = 400
+    return cache
+}()
+
+actor ImagePipeline {
+    static let shared = ImagePipeline()
+
+    private var running: [String: Task<UIImage?, Never>] = [:]
+
+    nonisolated func cached(_ url: String) -> UIImage? {
+        coverCache.object(forKey: url as NSString)
+    }
+
+    func image(_ url: String) async -> UIImage? {
+        if let hit = cached(url) { return hit }
+        if let task = running[url] { return await task.value }
+        let task = Task<UIImage?, Never> { await Self.download(url) }
+        running[url] = task
+        let image = await task.value
+        running[url] = nil
+        if let image { coverCache.setObject(image, forKey: url as NSString) }
+        return image
+    }
+
+    private static func download(_ url: String) async -> UIImage? {
+        guard let address = normalized(url) else { return nil }
+        for attempt in 0..<3 {
+            if let (data, response) = try? await URLSession.shared.data(from: address) {
+                if let image = UIImage(data: data) {
+                    return image.preparingForDisplay() ?? image
+                }
+                if let http = response as? HTTPURLResponse, (400..<500).contains(http.statusCode) {
+                    return nil
+                }
+            }
+            try? await Task.sleep(nanoseconds: UInt64(attempt + 1) * 500_000_000)
+        }
+        return nil
+    }
+
+    /// iOS solo deja cargar por https, y algunos servicios dan direcciones sin esquema o http.
+    private static func normalized(_ url: String) -> URL? {
+        var text = url.trimmingCharacters(in: .whitespaces)
+        if text.hasPrefix("//") { text = "https:" + text }
+        if text.hasPrefix("http://") { text = "https://" + text.dropFirst("http://".count) }
+        return URL(string: text)
     }
 }
 
@@ -284,6 +344,10 @@ struct PlayerBar: View {
                     Text(track.artists).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 8)
+                Button { store.engine.previous() } label: {
+                    Image(systemName: "backward.fill").font(.system(size: 20))
+                }
+                .buttonStyle(.plain)
                 PlayButton(status: state.status, size: 22) { store.engine.toggle() }
                 Button { store.engine.next() } label: {
                     Image(systemName: "forward.fill").font(.system(size: 20))
@@ -332,6 +396,7 @@ struct PlayerView: View {
     @State private var scrub: Double?
     @State private var volume: Double = 1
     @State private var showQueue = false
+    @State private var showLyrics = false
 
     var body: some View {
         let state = store.state
@@ -394,20 +459,30 @@ struct PlayerView: View {
             }
             .padding(.horizontal, 24)
 
-            Button {
-                showQueue = true
-            } label: {
-                Label(
-                    "Canción \(state.index + 1) de \(state.queueLength) · \(providerName(state.provider))",
-                    systemImage: "list.bullet"
-                )
-                .font(.footnote)
+            HStack(spacing: 28) {
+                Button {
+                    showLyrics = true
+                } label: {
+                    Label("Letra", systemImage: "quote.bubble")
+                }
+                Button {
+                    showQueue = true
+                } label: {
+                    Label("Cola · \(state.index + 1) de \(state.queueLength)", systemImage: "list.bullet")
+                }
             }
+            .font(.footnote)
+            Text(providerName(state.provider))
+                .font(.caption)
+                .foregroundStyle(.secondary)
             Spacer(minLength: 0)
         }
         .onAppear { volume = Double(state.volume) }
         .sheet(isPresented: $showQueue) {
             QueueView().environmentObject(store)
+        }
+        .sheet(isPresented: $showLyrics) {
+            LyricsView().environmentObject(store)
         }
     }
 
