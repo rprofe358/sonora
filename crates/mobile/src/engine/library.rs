@@ -157,19 +157,29 @@ impl Engine {
 
     pub fn library_tracks(&self, slug: String) -> Result<Vec<TrackItem>, MobileError> {
         let api = self.inner.api(&slug)?;
-        let tracks = block(async { api.saved_tracks().await })?;
+        // Las canciones del teléfono son todas las encontradas, no solo las del corazón.
+        let tracks = block(async {
+            let all = api.all_tracks().await.unwrap_or_default();
+            if all.is_empty() { api.saved_tracks().await } else { Ok(all) }
+        })?;
         Ok(tracks.iter().filter_map(item).collect())
     }
 
     pub fn library_albums(&self, slug: String) -> Result<Vec<AlbumItem>, MobileError> {
         let api = self.inner.api(&slug)?;
-        let albums = block(async { api.saved_albums().await })?;
+        let albums = block(async {
+            let all = api.all_albums().await.unwrap_or_default();
+            if all.is_empty() { api.saved_albums().await } else { Ok(all) }
+        })?;
         Ok(albums.iter().map(album).collect())
     }
 
     pub fn library_artists(&self, slug: String) -> Result<Vec<ArtistItem>, MobileError> {
         let api = self.inner.api(&slug)?;
-        let artists = block(async { api.saved_artists().await })?;
+        let artists = block(async {
+            let all = api.all_artists().await.unwrap_or_default();
+            if all.is_empty() { api.saved_artists().await } else { Ok(all) }
+        })?;
         Ok(artists.iter().map(artist).collect())
     }
 

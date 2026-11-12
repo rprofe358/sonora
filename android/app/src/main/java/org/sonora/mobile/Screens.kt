@@ -123,6 +123,7 @@ fun SearchScreen() {
     var results by remember { mutableStateOf<SearchResults?>(null) }
     var searchedIn by remember { mutableStateOf("") }
     var searching by remember { mutableStateOf(false) }
+    var failure by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     suspend fun find(text: String, slug: String, loud: Boolean) {
@@ -132,8 +133,13 @@ fun SearchScreen() {
                 .onSuccess {
                     results = it
                     searchedIn = slug
+                    failure = null
                 }
-                .onFailure { if (loud) Store.problem = describe(it) }
+                .onFailure {
+                    // mientras se escribe, el error se ve en la lista en vez de en un aviso
+                    failure = describe(it)
+                    if (loud) Store.problem = describe(it)
+                }
         } finally {
             searching = false
         }
@@ -193,6 +199,15 @@ fun SearchScreen() {
                             Text(text, Modifier.weight(1f).padding(horizontal = 16.dp), maxLines = 1)
                             IconButton(onClick = { Store.forget(text) }) { Icon(Icons.Filled.Close, "Quitar") }
                         }
+                    }
+                }
+                failure?.takeIf { query.isNotBlank() }?.let { message ->
+                    item {
+                        Text(
+                            "No se pudo buscar: $message",
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(16.dp),
+                        )
                     }
                 }
                 if (found != null && query.isNotBlank()) {
