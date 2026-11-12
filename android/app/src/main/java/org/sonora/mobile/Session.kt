@@ -47,18 +47,24 @@ import uniffi.sonora_mobile.SessionInfo
 fun SessionScreen() {
     Column(Modifier.fillMaxSize()) {
         Bar("Sesión")
-        Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            val session = Store.session
-            if (session != null) InSession(session) else Outside()
-        }
+        SessionContent(Modifier.fillMaxSize())
+    }
+}
+
+/** Unirse, iniciar o ver la sesión en curso. También se muestra en el reproductor. */
+@Composable
+fun SessionContent(modifier: Modifier, slug: String? = null) {
+    Column(
+        modifier.verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        val session = Store.session
+        if (session != null) InSession(session) else Outside(slug)
     }
 }
 
 @Composable
-private fun Outside() {
+private fun Outside(slug: String?) {
     var code by rememberSaveable { mutableStateOf("") }
     var remote by rememberSaveable { mutableStateOf(false) }
     Text(
@@ -88,11 +94,12 @@ private fun Outside() {
 
     HorizontalDivider(Modifier.padding(vertical = 8.dp))
     Text("Iniciar", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-    ProviderPicker()
+    if (slug == null) ProviderPicker()
+    val from = slug ?: Store.selected
     OutlinedButton(
-        onClick = { Store.startSession() },
-        enabled = Store.signedIn.isNotEmpty() && !Store.sessionBusy,
-    ) { Text("Iniciar una sesión en ${providerName(Store.selected)}") }
+        onClick = { Store.startSession(from) },
+        enabled = Store.signedIn.any { it.slug == from } && !Store.sessionBusy,
+    ) { Text("Iniciar una sesión en ${providerName(from)}") }
     Text(
         "La sesión suena desde ese servicio; los demás necesitan haber iniciado sesión en él.",
         style = MaterialTheme.typography.bodySmall,

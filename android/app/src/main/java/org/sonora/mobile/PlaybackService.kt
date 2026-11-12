@@ -79,12 +79,21 @@ class PlaybackService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_CLOSE) {
+            Store.shutdown()
+            return START_NOT_STICKY
+        }
         MediaButtonReceiver.handleIntent(media, intent)
-        Store.state?.let { show(it) } ?: showPlaceholder()
+        Store.state?.let { show(it, starting = true) } ?: showPlaceholder()
         return START_NOT_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    /** Al quitar Sonora de las apps recientes, se cierra del todo. */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Store.shutdown()
+    }
 
     override fun onDestroy() {
         instance = null
@@ -143,7 +152,7 @@ class PlaybackService : Service() {
         foreground = true
     }
 
-    fun show(state: PlaybackState) {
+    fun show(state: PlaybackState, starting: Boolean = false) {
         val track = state.track
         if (track == null) {
             if (foreground) stopForeground(STOP_FOREGROUND_REMOVE)
@@ -191,6 +200,7 @@ class PlaybackService : Service() {
             .setContentIntent(open)
             .setSilent(true)
             .setOngoing(playing)
+            .setDeleteIntent(close)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .addAction(R.drawable.ic_notification_previous, "Anterior", button(PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS))
             .addAction(
@@ -199,14 +209,30 @@ class PlaybackService : Service() {
                 button(PlaybackStateCompat.ACTION_PLAY_PAUSE),
             )
             .addAction(R.drawable.ic_notification_next, "Siguiente", button(PlaybackStateCompat.ACTION_SKIP_TO_NEXT))
+            .addAction(R.drawable.ic_notification_close, "Cerrar Sonora", close)
             .setStyle(
                 androidx.media.app.NotificationCompat.MediaStyle()
                     .setMediaSession(media.sessionToken)
-                    .setShowActionsInCompactView(0, 1, 2),
+                    .setShowActionsInCompactView(0, 1, 2)
+                    .setShowCancelButton(true)
+                    .setCancelButtonIntent(close),
             )
             .build()
-        goForeground(notification)
+        // Android exige pasar a primer plano en cuanto arranca el servicio, aunque esté en pausa.
+        if (playing || starting) goForeground(notification)
+        if (!playing) {
+            // En pausa la notificación se puede quitar (y quitarla cierra Sonora).
+            if (foreground) stopForeground(STOP_FOREGROUND_DETACH)
+            foreground = false
+            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager).notify(ID, notification)
+        }
     }
+
+    private val close: PendingIntent
+        get() = PendingIntent.getService(
+            this, 1, Intent(this, PlaybackService::class.java).setAction(ACTION_CLOSE),
+            PendingIntent.FLAG_IMMUTABLE,
+        )
 
     private fun button(action: Long) = MediaButtonReceiver.buildMediaButtonPendingIntent(this, action)
 
@@ -226,6 +252,7 @@ class PlaybackService : Service() {
     companion object {
         private const val CHANNEL = "playback"
         private const val ID = 1
+        private const val ACTION_CLOSE = "org.sonora.mobile.CLOSE"
         var instance: PlaybackService? = null
             private set
 

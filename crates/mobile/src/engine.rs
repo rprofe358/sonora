@@ -554,6 +554,19 @@ impl Engine {
         drop(queue);
         self.inner.notify();
     }
+
+    /// Vacía lo que viene después de la canción actual, que sigue sonando.
+    pub fn clear_queue(&self) {
+        if self.inner.remote() {
+            return self.inner.remote_change(|state| state.upcoming.clear());
+        }
+        let mut queue = lock(&self.inner.queue);
+        let keep = (queue.index + 1).min(queue.tracks.len());
+        queue.tracks.truncate(keep);
+        queue.preloaded = false;
+        drop(queue);
+        self.inner.notify();
+    }
 }
 
 struct Session {

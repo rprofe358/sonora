@@ -19,6 +19,7 @@ import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
+import uniffi.sonora_mobile.Status
 import uniffi.sonora_mobile.prepare
 
 /** Guarda el contexto de la app en el motor (cpal lo necesita para AAudio, rustls para verificar). */
@@ -50,6 +51,19 @@ class MainActivity : ComponentActivity() {
                 SonoraRoot()
             }
         }
+    }
+
+    /**
+     * Al salir con «atrás»: en TV (sin notificación desde donde pararla) Sonora se cierra del
+     * todo; en el teléfono sigue sonando si había música, y si no, se cierra.
+     */
+    override fun onDestroy() {
+        super.onDestroy()
+        if (!isFinishing || isChangingConfigurations) return
+        val tv = !packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TOUCHSCREEN) ||
+            packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)
+        val playing = Store.state?.status.let { it == Status.PLAYING || it == Status.LOADING }
+        if (tv || !playing) Store.shutdown()
     }
 }
 

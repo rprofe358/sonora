@@ -59,6 +59,7 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.8.5")
     implementation("androidx.media:media:1.7.0")
     implementation("androidx.webkit:webkit:1.12.1")
+    implementation("androidx.browser:browser:1.8.0")
     implementation("io.coil-kt.coil3:coil-compose:3.0.4")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
     // UniFFI llama al motor en Rust a través de JNA.

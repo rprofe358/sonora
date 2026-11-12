@@ -11,6 +11,13 @@
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
+    <!-- Para iniciar sesión en el navegador del teléfono (Chrome), como en el iPhone con Safari. -->
+    <queries>
+        <intent>
+            <action android:name="android.support.customtabs.action.CustomTabsService" />
+        </intent>
+    </queries>
+
     <application
         android:name=".SonoraApp"
         android:label="Sonora"

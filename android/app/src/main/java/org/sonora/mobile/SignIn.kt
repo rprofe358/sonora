@@ -6,6 +6,8 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
 import android.webkit.CookieManager
+import androidx.browser.customtabs.CustomTabsClient
+import androidx.browser.customtabs.CustomTabsIntent
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Arrangement
@@ -54,8 +56,26 @@ private const val CHROME =
 @Composable
 fun PromptDialog(pending: PendingPrompt) {
     when (val prompt = pending.prompt) {
-        is Prompt.OpenUrl -> WebDialog("Iniciar sesión", prompt.url, agent = null, external = true) { web ->
-            web.loadUrl(prompt.url)
+        is Prompt.OpenUrl -> {
+            val context = LocalContext.current
+            val browser = remember { CustomTabsClient.getPackageName(context, emptyList()) }
+            if (browser == null) {
+                // Sin Chrome (TV, proyectores): una vista web dentro de la app.
+                WebDialog("Iniciar sesión", prompt.url, agent = null, external = true) { web ->
+                    web.loadUrl(prompt.url)
+                }
+            } else {
+                // Como Safari en el iPhone: el navegador de verdad, con las cuentas ya iniciadas.
+                // Al aprobar, vuelve a un servidor local del propio motor y la sesión se completa.
+                LaunchedEffect(pending.id) { openTab(context, browser, prompt.url) }
+                AlertDialog(
+                    onDismissRequest = {},
+                    title = { Text("Iniciar sesión") },
+                    text = { Text("Termina de iniciar sesión en el navegador. Cuando veas que se completó, vuelve a Sonora.") },
+                    confirmButton = { TextButton(onClick = { openTab(context, browser, prompt.url) }) { Text("Abrir de nuevo") } },
+                    dismissButton = { TextButton(onClick = { Store.cancelSignIn() }) { Text("Cancelar") } },
+                )
+            }
         }
         is Prompt.WebCookies -> CookieDialog(pending.id, prompt)
         is Prompt.ShowCode -> {
@@ -92,6 +112,14 @@ fun PromptDialog(pending: PendingPrompt) {
             confirmButton = { TextButton(onClick = { Store.cancelSignIn() }) { Text("Cancelar") } },
         )
     }
+}
+
+private fun openTab(context: android.content.Context, browser: String, url: String) {
+    runCatching {
+        val tab = CustomTabsIntent.Builder().setShowTitle(true).build()
+        tab.intent.setPackage(browser)
+        tab.launchUrl(context, Uri.parse(url))
+    }.onFailure { open(context, url) }
 }
 
 private fun open(context: android.content.Context, url: String) {

@@ -100,8 +100,23 @@ object Store : EngineListener {
             val result = run { it.signIn(provider.slug, method) }
             signingIn = null
             prompt = null
-            result.onSuccess { selected = provider.slug }.onFailure { problem = describe(it) }
+            result.onSuccess {
+                selected = provider.slug
+                comeBack()
+            }.onFailure { problem = describe(it) }
             refresh()
+        }
+    }
+
+    /** Tras iniciar sesión en el navegador, intenta traer Sonora de vuelta al frente. */
+    private fun comeBack() {
+        runCatching {
+            app.startActivity(
+                android.content.Intent(app, MainActivity::class.java).addFlags(
+                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                ),
+            )
         }
     }
 
@@ -181,9 +196,8 @@ object Store : EngineListener {
 
     // ── Sesiones ───────────────────────────────────────────────────────────────────────────
 
-    fun startSession() {
+    fun startSession(slug: String = selected) {
         sessionBusy = true
-        val slug = selected
         launch {
             run { it.sessionStart(slug) }.onFailure {
                 problem = describe(it)
@@ -200,6 +214,19 @@ object Store : EngineListener {
                 sessionBusy = false
             }
         }
+    }
+
+    /** Cierra Sonora del todo: sale de la sesión, para la música y termina el proceso. */
+    fun shutdown() {
+        runCatching {
+            if (session != null) engine.sessionLeave()
+            engine.pause()
+        }
+        PlaybackService.instance?.let {
+            it.stopForeground(android.app.Service.STOP_FOREGROUND_REMOVE)
+            it.stopSelf()
+        }
+        main.postDelayed({ android.os.Process.killProcess(android.os.Process.myPid()) }, 300)
     }
 
     // ── Scrobbling ─────────────────────────────────────────────────────────────────────────
