@@ -50,6 +50,11 @@ final class Store: ObservableObject {
     @Published var session: SessionInfo?
     /// Se está creando o uniendo a una sesión.
     @Published var sessionBusy = false
+    @Published var audio: AudioSettings
+    /// Canciones que esperan elegir a qué playlist van.
+    @Published var addingToPlaylist: PendingAdd?
+    /// Sube cada vez que cambian las playlists, para recargar la biblioteca.
+    @Published var libraryRevision = 0
     /// El proveedor en el que se busca.
     @Published var selected: String = "youtube"
 
@@ -58,7 +63,12 @@ final class Store: ObservableObject {
         self.bridge = bridge
         engine = Engine(listener: bridge)
         state = engine.state()
+        audio = engine.audioSettings()
         bridge.store = self
+        if let saved = Self.savedAudio() {
+            engine.setAudioSettings(settings: saved)
+            audio = saved
+        }
         nowPlaying.attach(engine: engine)
         minter.start()
         refresh()
@@ -200,6 +210,127 @@ final class Store: ObservableObject {
         }
     }
 
+    // MARK: Ajustes de audio
+
+    private static let audioKey = "audio-settings"
+
+    private static func savedAudio() -> AudioSettings? {
+        guard let saved = UserDefaults.standard.dictionary(forKey: audioKey) else { return nil }
+        let quality: AudioQuality
+        switch saved["quality"] as? String {
+        case "low": quality = .low
+        case "normal": quality = .normal
+        case "lossless": quality = .lossless
+        case "hires": quality = .hiRes
+        default: quality = .high
+        }
+        return AudioSettings(
+            quality: quality,
+            normalisation: saved["normalisation"] as? Bool ?? true,
+            gapless: saved["gapless"] as? Bool ?? true,
+            equalizer: saved["equalizer"] as? Bool ?? false,
+            bands: saved["bands"] as? [Double] ?? Array(repeating: 0, count: 10)
+        )
+    }
+
+    func applyAudio(_ settings: AudioSettings) {
+        audio = settings
+        let quality: String
+        switch settings.quality {
+        case .low: quality = "low"
+        case .normal: quality = "normal"
+        case .high: quality = "high"
+        case .lossless: quality = "lossless"
+        case .hiRes: quality = "hires"
+        }
+        UserDefaults.standard.set([
+            "quality": quality,
+            "normalisation": settings.normalisation,
+            "gapless": settings.gapless,
+            "equalizer": settings.equalizer,
+            "bands": settings.bands,
+        ] as [String: Any], forKey: Self.audioKey)
+        let engine = self.engine
+        Task.detached { engine.setAudioSettings(settings: settings) }
+    }
+
+    // MARK: Playlists
+
+    func createPlaylist(_ name: String, in slug: String) {
+        let name = name.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return }
+        Task {
+            switch await run({ try $0.createPlaylist(slug: slug, name: name) }) {
+            case .success: libraryRevision += 1
+            case .failure(let error): problem = describe(error)
+            }
+        }
+    }
+
+    func renamePlaylist(_ id: String, to name: String, in slug: String) async -> Bool {
+        let name = name.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return false }
+        switch await run({ try $0.renamePlaylist(slug: slug, id: id, name: name) }) {
+        case .success:
+            libraryRevision += 1
+            return true
+        case .failure(let error):
+            problem = describe(error)
+            return false
+        }
+    }
+
+    func deletePlaylist(_ id: String, in slug: String) async -> Bool {
+        switch await run({ try $0.deletePlaylist(slug: slug, id: id) }) {
+        case .success:
+            libraryRevision += 1
+            return true
+        case .failure(let error):
+            problem = describe(error)
+            return false
+        }
+    }
+
+    func addToPlaylist(_ playlist: PlaylistItem, adding: PendingAdd) {
+        addingToPlaylist = nil
+        let ids = adding.tracks.map(\.id)
+        let slug = adding.slug
+        Task {
+            switch await run({ try $0.addToPlaylist(slug: slug, playlist: playlist.id, tracks: ids) }) {
+            case .success:
+                problem = "Agregada a «\(playlist.title)»."
+                libraryRevision += 1
+            case .failure(let error):
+                problem = describe(error)
+            }
+        }
+    }
+
+    func removeFromPlaylist(_ playlist: String, track: String, in slug: String) async -> Bool {
+        switch await run({ try $0.removeFromPlaylist(slug: slug, playlist: playlist, track: track) }) {
+        case .success: return true
+        case .failure(let error):
+            problem = describe(error)
+            return false
+        }
+    }
+
+    // MARK: Scrobbling
+
+    /// Vincula un servicio de scrobbling; Last.fm y Libre.fm abren la aprobación en Safari.
+    func linkScrobble(_ id: String, key: String, secret: String, token: String, server: String) async -> Bool {
+        let result = await run({
+            try $0.scrobbleConnect(id: id, key: key, secret: secret, token: token, server: server)
+        })
+        prompt = nil
+        switch result {
+        case .success: return true
+        case .failure(let error):
+            problem = describe(error)
+            return false
+        }
+    }
+
     func startSession() {
         sessionBusy = true
         let slug = selected
@@ -234,6 +365,13 @@ final class Store: ObservableObject {
         self.state = state
         nowPlaying.update(state)
     }
+}
+
+/// Canciones que esperan elegir a qué playlist van.
+struct PendingAdd: Identifiable {
+    let id = UUID()
+    let slug: String
+    let tracks: [TrackItem]
 }
 
 /// El mensaje de un error del motor, sin el nombre del tipo delante.

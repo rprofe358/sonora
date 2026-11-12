@@ -151,6 +151,11 @@ struct TrackMenu: ViewModifier {
             } label: {
                 Label("Guardar en tu biblioteca", systemImage: "heart")
             }
+            Button {
+                store.addingToPlaylist = PendingAdd(slug: slug, tracks: [track])
+            } label: {
+                Label("Agregar a una playlist…", systemImage: "text.badge.plus")
+            }
             if let album = track.albumId {
                 Button {
                     open(.album(slug: slug, id: album))
@@ -388,6 +393,8 @@ enum LibrarySection: String, CaseIterable, Identifiable {
 struct LibraryView: View {
     @EnvironmentObject private var store: Store
     @State private var section = LibrarySection.playlists
+    @State private var creating = false
+    @State private var newName = ""
 
     var body: some View {
         RoutedStack {
@@ -407,6 +414,23 @@ struct LibraryView: View {
                 }
             }
             .navigationTitle("Biblioteca")
+            .toolbar {
+                if !store.signedIn.isEmpty {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button {
+                            newName = ""
+                            creating = true
+                        } label: {
+                            Image(systemName: "plus")
+                        }
+                    }
+                }
+            }
+            .alert("Nueva playlist", isPresented: $creating) {
+                TextField("Nombre", text: $newName)
+                Button("Crear") { store.createPlaylist(newName, in: store.selected) }
+                Button("Cancelar", role: .cancel) {}
+            }
             .withPlayerBar()
         }
     }
@@ -420,7 +444,7 @@ struct LibrarySectionView: View {
     var body: some View {
         switch section {
         case .playlists:
-            Loader(key: "playlists-\(slug)", load: { try $0.libraryPlaylists(slug: slug) }) { playlists in
+            Loader(key: "playlists-\(slug)-\(store.libraryRevision)", load: { try $0.libraryPlaylists(slug: slug) }) { playlists in
                 List(playlists, id: \.id) { PlaylistRow(playlist: $0, slug: slug) }
                     .listStyle(.plain)
                     .overlay { if playlists.isEmpty { Empty() } }
@@ -558,12 +582,18 @@ struct PlaylistBody: View {
     @State private var tracks: [TrackItem]
     @State private var continuation: String?
     @State private var loading = false
+    @State private var title: String
+    @State private var renaming = false
+    @State private var newName = ""
+    @State private var confirmDelete = false
+    @Environment(\.dismiss) private var dismiss
 
     init(page: PlaylistPage, slug: String) {
         self.page = page
         self.slug = slug
         _tracks = State(initialValue: page.tracks)
         _continuation = State(initialValue: page.continuation)
+        _title = State(initialValue: page.playlist.title)
     }
 
     var body: some View {
@@ -571,7 +601,7 @@ struct PlaylistBody: View {
             VStack(spacing: 8) {
                 Cover(url: page.playlist.cover, size: 220)
                     .shadow(radius: 8, y: 4)
-                Text(page.playlist.title)
+                Text(title)
                     .font(.title3.bold())
                     .multilineTextAlignment(.center)
                 Text(page.playlist.owner).foregroundStyle(.secondary)
@@ -579,7 +609,7 @@ struct PlaylistBody: View {
             .frame(maxWidth: .infinity)
             .listRowSeparator(.hidden)
             PlayButtons(tracks: tracks, slug: slug)
-            TrackList(tracks: tracks, slug: slug)
+            TrackList(tracks: tracks, slug: slug, onRemove: removal)
             if let continuation {
                 Button(loading ? "Cargando…" : "Cargar más") { more(continuation) }
                     .disabled(loading)
@@ -588,14 +618,66 @@ struct PlaylistBody: View {
         }
         .listStyle(.plain)
         .toolbar {
-            if !page.playlist.owned {
-                ToolbarItem(placement: .primaryAction) {
+            ToolbarItem(placement: .primaryAction) {
+                if page.playlist.owned {
+                    Menu {
+                        Button {
+                            newName = title
+                            renaming = true
+                        } label: {
+                            Label("Renombrar", systemImage: "pencil")
+                        }
+                        Button(role: .destructive) {
+                            confirmDelete = true
+                        } label: {
+                            Label("Eliminar playlist", systemImage: "trash")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                } else {
                     Button {
                         store.save(.playlist, id: page.playlist.id, from: slug)
                     } label: {
                         Image(systemName: "heart")
                     }
                 }
+            }
+        }
+        .alert("Renombrar playlist", isPresented: $renaming) {
+            TextField("Nombre", text: $newName)
+            Button("Guardar") {
+                let name = newName
+                Task {
+                    if await store.renamePlaylist(page.playlist.id, to: name, in: slug) { title = name }
+                }
+            }
+            Button("Cancelar", role: .cancel) {}
+        }
+        .confirmationDialog("¿Eliminar «\(title)»?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            Button("Eliminar", role: .destructive) {
+                Task {
+                    if await store.deletePlaylist(page.playlist.id, in: slug) { dismiss() }
+                }
+            }
+        } message: {
+            Text("Se borra también en el servicio.")
+        }
+    }
+
+    /// Solo las playlists propias dejan quitar canciones.
+    private var removal: ((Int) -> Void)? {
+        guard page.playlist.owned else { return nil }
+        return { index in remove(index) }
+    }
+
+    private func remove(_ index: Int) {
+        guard tracks.indices.contains(index) else { return }
+        let track = tracks[index]
+        tracks.remove(at: index)
+        Task {
+            if !(await store.removeFromPlaylist(page.playlist.id, track: track.id, in: slug)) {
+                tracks.insert(track, at: min(index, tracks.count))
             }
         }
     }

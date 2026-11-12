@@ -93,6 +93,8 @@ struct TrackList: View {
     let slug: String
     var numbered = false
     var covers = true
+    /// Si se da, deslizar una canción la quita (playlists propias).
+    var onRemove: ((Int) -> Void)? = nil
 
     var body: some View {
         ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
@@ -109,6 +111,11 @@ struct TrackList: View {
             .buttonStyle(.plain)
             .disabled(!track.playable)
             .trackMenu(track, slug: slug)
+            .swipeActions {
+                if let onRemove {
+                    Button("Quitar", role: .destructive) { onRemove(index) }
+                }
+            }
         }
     }
 }
@@ -252,10 +259,22 @@ struct AccountsView: View {
                         Text(provider.name)
                     } footer: {
                         if provider.slug == "spotify" {
-                            Text("Spotify necesita una cuenta Premium para reproducir.")
+                            Text("Spotify normalmente pide una cuenta Premium para reproducir.")
                         } else if provider.slug == "youtube" {
-                            Text("Sin cuenta puedes buscar y escuchar; con tu cuenta de Google ves tu biblioteca (fase 2).")
+                            Text("Sin cuenta puedes buscar y escuchar; con tu cuenta de Google ves tu biblioteca y tus playlists.")
                         }
+                    }
+                }
+                Section("Ajustes") {
+                    NavigationLink {
+                        AudioSettingsView()
+                    } label: {
+                        Label("Audio y ecualizador", systemImage: "slider.vertical.3")
+                    }
+                    NavigationLink {
+                        ScrobbleView()
+                    } label: {
+                        Label("Scrobbling", systemImage: "chart.bar.xaxis")
                     }
                 }
                 Section("Diagnóstico") {
@@ -265,7 +284,7 @@ struct AccountsView: View {
                     }
                 }
             }
-            .navigationTitle("Cuentas")
+            .navigationTitle("Ajustes")
             .task { outputs = await Task.detached { audioOutputs() }.value }
             .withPlayerBar()
         }

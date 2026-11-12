@@ -13,6 +13,7 @@ crate-type = ["staticlib", "lib"]
 
 [dependencies]
 anyhow.workspace = true
+dirs.workspace = true
 futures.workspace = true
 log.workspace = true
 music.workspace = true

@@ -26,7 +26,10 @@ struct ContentView: View {
             SessionView()
                 .tabItem { Label("Sesión", systemImage: "person.2.wave.2") }
             AccountsView()
-                .tabItem { Label("Cuentas", systemImage: "person.crop.circle") }
+                .tabItem { Label("Ajustes", systemImage: "gearshape") }
+        }
+        .sheet(item: $store.addingToPlaylist) { adding in
+            PlaylistPicker(adding: adding).environmentObject(store)
         }
         .sheet(item: $store.prompt, onDismiss: store.promptDismissed) { pending in
             PromptView(pending: pending)

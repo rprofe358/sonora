@@ -287,6 +287,48 @@ impl Engine {
         Ok(tracks.iter().filter_map(item).collect())
     }
 
+    /// Crea una playlist vacía y devuelve su id.
+    pub fn create_playlist(&self, slug: String, name: String) -> Result<String, MobileError> {
+        let api = self.inner.api(&slug)?;
+        block(async { api.create_playlist(name.trim()).await })
+    }
+
+    pub fn rename_playlist(
+        &self,
+        slug: String,
+        id: String,
+        name: String,
+    ) -> Result<(), MobileError> {
+        let api = self.inner.api(&slug)?;
+        block(async { api.rename_playlist(&id, name.trim()).await })
+    }
+
+    pub fn delete_playlist(&self, slug: String, id: String) -> Result<(), MobileError> {
+        let api = self.inner.api(&slug)?;
+        block(async { api.delete_playlist(&id).await })
+    }
+
+    /// Agrega canciones al final de una playlist, en orden.
+    pub fn add_to_playlist(
+        &self,
+        slug: String,
+        playlist: String,
+        tracks: Vec<String>,
+    ) -> Result<(), MobileError> {
+        let api = self.inner.api(&slug)?;
+        block(async { api.add_tracks_to_playlist(&playlist, &tracks).await })
+    }
+
+    pub fn remove_from_playlist(
+        &self,
+        slug: String,
+        playlist: String,
+        track: String,
+    ) -> Result<(), MobileError> {
+        let api = self.inner.api(&slug)?;
+        block(async { api.remove_track_from_playlist(&playlist, &track).await })
+    }
+
     /// Guarda algo en la biblioteca del servicio, o lo quita.
     pub fn set_saved(
         &self,

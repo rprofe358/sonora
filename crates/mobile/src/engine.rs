@@ -20,11 +20,15 @@ use crate::{MobileError, failed, runtime};
 
 mod library;
 mod lyrics;
+mod scrobble;
 mod session;
+mod settings;
 
 pub use library::*;
 pub use lyrics::*;
+pub use scrobble::*;
 pub use session::*;
+pub use settings::*;
 
 /// Cada cuánto informa el motor de la posición.
 const POSITION_INTERVAL: Duration = Duration::from_millis(500);
@@ -188,6 +192,8 @@ impl Engine {
                 config: Mutex::new(config),
                 lyrics: lyrics::providers(),
                 listening: Mutex::default(),
+                scrobbler: Mutex::default(),
+                scrobble_cancel: Arc::default(),
             }),
         })
     }
@@ -291,6 +297,7 @@ impl Engine {
 
     /// Abandona el inicio de sesión en curso; `sign_in` vuelve con un error.
     pub fn cancel_sign_in(&self) {
+        self.inner.scrobble_cancel.notify_waiters();
         lock(&self.inner.input).take();
         let signing = lock(&self.inner.signing).take();
         if let Some(provider) = signing.and_then(|slug| self.inner.provider(&slug).ok()) {
@@ -636,12 +643,14 @@ struct Inner {
     queue: Mutex<Queue>,
     now: Mutex<Now>,
     level: Mutex<f32>,
-    /// Se guarda para que el ecualizador (apagado por ahora) siga existiendo.
-    #[allow(dead_code)]
+    /// El único que puede cambiar el ecualizador que lee el reproductor.
     equalizer: Mutex<EqualizerWriter>,
     config: Mutex<PlaybackConfig>,
     lyrics: Vec<Arc<dyn music::LyricsProvider>>,
     listening: Mutex<session::Listening>,
+    scrobbler: Mutex<scrobble::Scrobbler>,
+    /// Corta una vinculación de scrobbling que espera la aprobación en el navegador.
+    scrobble_cancel: Arc<tokio::sync::Notify>,
 }
 
 impl Inner {
@@ -933,6 +942,7 @@ impl Inner {
     fn notify(&self) {
         self.listener.on_state(self.state());
         self.publish();
+        self.scrobble_tick();
     }
 }
 
