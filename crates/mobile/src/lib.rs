@@ -44,7 +44,10 @@ fn runtime() -> &'static tokio::runtime::Runtime {
     })
 }
 
+/// Un error del motor. Va como "flat" para que Kotlin no choque con `Throwable.message`: al
+/// otro lado llega solo el texto de `Display`.
 #[derive(Debug, uniffi::Error)]
+#[uniffi(flat_error)]
 pub enum MobileError {
     Failed { message: String },
 }
