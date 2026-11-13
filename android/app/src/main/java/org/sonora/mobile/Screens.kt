@@ -15,6 +15,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import coil3.compose.AsyncImage
 import uniffi.sonora_mobile.PlaylistItem
+import uniffi.sonora_mobile.GenreTile
+import uniffi.sonora_mobile.Mix
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -127,6 +132,7 @@ fun HomeScreen() {
                     item { Greeting() }
                     item { ProviderPicker() }
                     pick?.let { item { Hero(it, data.shelves, slug) } }
+                    item { MixesRow(slug) }
                     if (data.liked.isNotEmpty()) {
                         item { SectionTitle("Tus me gusta") }
                         item {
@@ -220,7 +226,9 @@ private fun Hero(item: MediaItem, shelves: List<Shelf>, slug: String) {
             .focusRing(RoundedCornerShape(20.dp))
             .clickable { open() },
     ) {
-        cover?.let {
+        // la portada más grande que dé el servicio, para que no se vea pixelada
+        val big = remember(cover, slug) { cover?.let { runCatching { Store.engine.coverFull(slug, it) }.getOrDefault(it) } }
+        big?.let {
             AsyncImage(
                 model = fixUrl(it),
                 contentDescription = null,
@@ -277,6 +285,140 @@ private fun ShelfRow(shelf: Shelf, slug: String) {
     }
 }
 
+/** Los mixes del día: una fila de tarjetas que tocan el mix entero. */
+@Composable
+private fun MixesRow(slug: String) {
+    var mixes by remember(slug) { mutableStateOf<List<Mix>?>(null) }
+    LaunchedEffect(slug) {
+        mixes = Store.run { it.dailyMixes(slug) }.getOrDefault(emptyList())
+    }
+    val found = mixes
+    if (found != null && found.isEmpty()) return
+    SectionTitle("Mixes para ti")
+    if (found == null) {
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+            Text("Armando tus mixes…", Modifier.padding(start = 12.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        return
+    }
+    LazyRow(
+        contentPadding = PaddingValues(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        items(found) { mix ->
+            Column(
+                Modifier
+                    .width(156.dp)
+                    .focusRing(RoundedCornerShape(16.dp))
+                    .clickable { Store.play(mix.tracks, 0, slug) },
+            ) {
+                Box(Modifier.size(156.dp).clip(RoundedCornerShape(16.dp)).background(MaterialTheme.colorScheme.surfaceVariant)) {
+                    mix.cover?.let {
+                        AsyncImage(model = fixUrl(it), contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                    }
+                    Box(
+                        Modifier.fillMaxSize().background(
+                            Brush.verticalGradient(
+                                listOf(Color.Transparent, MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
+                            ),
+                        ),
+                    )
+                    Text(
+                        mix.title,
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.align(Alignment.BottomStart).padding(10.dp),
+                    )
+                }
+                if (mix.subtitle.isNotEmpty()) {
+                    Text(
+                        mix.subtitle,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Colores para las tarjetas de Explorar, elegidos por el nombre del género. */
+private val tileColors = listOf(
+    Color(0xFFE8742C), Color(0xFF1E88E5), Color(0xFF2E7D32), Color(0xFF7E57C2),
+    Color(0xFFD81B60), Color(0xFF00897B), Color(0xFF6D4C41), Color(0xFF3949AB),
+)
+
+/** Explorar: los géneros y estados de ánimo del servicio, de dos en dos. */
+private fun androidx.compose.foundation.lazy.LazyListScope.explore(genres: List<GenreTile>, slug: String) {
+    if (genres.isEmpty()) return
+    item { SectionTitle("Explorar géneros y estados de ánimo") }
+    items(genres.chunked(2)) { pair ->
+        Row(Modifier.padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            pair.forEach { genre -> GenreTileCard(genre, slug, Modifier.weight(1f)) }
+            if (pair.size == 1) Spacer(Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun GenreTileCard(genre: GenreTile, slug: String, modifier: Modifier) {
+    val nav = LocalNav.current
+    val color = tileColors[Math.floorMod(genre.title.hashCode(), tileColors.size)]
+    Box(
+        modifier
+            .height(92.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(color)
+            .focusRing(RoundedCornerShape(14.dp))
+            .clickable { nav.navigate(Routes.genre(slug, genre.id, genre.title)) },
+    ) {
+        genre.cover?.let {
+            AsyncImage(
+                model = fixUrl(it),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 14.dp, y = 6.dp)
+                    .size(72.dp)
+                    .graphicsLayer { rotationZ = 22f }
+                    .clip(RoundedCornerShape(6.dp)),
+            )
+        }
+        Text(
+            genre.title,
+            color = Color.White,
+            fontWeight = FontWeight.Bold,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.align(Alignment.TopStart).padding(12.dp).fillMaxWidth(0.75f),
+        )
+    }
+}
+
+/** La página de un género: filas de playlists y álbumes. */
+@Composable
+fun GenreScreen(slug: String, id: String, title: String) {
+    Column(Modifier.fillMaxSize()) {
+        Bar(title.ifEmpty { "Explorar" }, back = true)
+        Loader(key = "genre-$slug-$id", load = { it.genre(slug, id) }) { shelves ->
+            LazyColumn(Modifier.fillMaxSize()) {
+                if (shelves.isEmpty()) {
+                    item { Text("Este género no tiene nada para mostrar.", Modifier.padding(16.dp)) }
+                }
+                items(shelves) { ShelfRow(it, slug) }
+                item { Spacer(Modifier.size(16.dp)) }
+            }
+        }
+    }
+}
+
 // ── Buscar ─────────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -287,6 +429,13 @@ fun SearchScreen() {
     var searching by remember { mutableStateOf(false) }
     var failure by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    // Explorar: los géneros del servicio elegido, para cuando no se está buscando nada
+    var genres by remember { mutableStateOf(listOf<GenreTile>()) }
+    val exploring = Store.selected
+    LaunchedEffect(exploring) {
+        genres = if (Store.signedIn.none { it.slug == exploring }) emptyList()
+        else Store.run { it.genres(exploring) }.getOrDefault(emptyList())
+    }
 
     suspend fun find(text: String, slug: String, loud: Boolean) {
         searching = true
@@ -379,6 +528,7 @@ fun SearchScreen() {
                         }
                     }
                 }
+                if (query.isBlank()) explore(genres, Store.selected)
                 if (query.isNotBlank()) {
                     items(suggestions, key = { "suggestion-$it" }) { text ->
                         Row(

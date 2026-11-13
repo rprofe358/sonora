@@ -21,7 +21,13 @@ struct SearchView: View {
                 } else {
                     ProviderPicker().listRowBackground(Color.clear)
                 }
-                if let results {
+                if query.isEmpty && !store.signedIn.isEmpty {
+                    Section("Explorar géneros y estados de ánimo") {
+                        ExploreGrid(slug: store.selected)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+                if let results, !query.isEmpty {
                     if !results.artists.isEmpty {
                         Section("Artistas") {
                             ScrollView(.horizontal, showsIndicators: false) {

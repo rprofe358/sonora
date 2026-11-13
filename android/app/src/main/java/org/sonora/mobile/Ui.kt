@@ -156,6 +156,7 @@ fun SonoraRoot() {
                 composable("album/{slug}/{id}") { AlbumScreen(arg(it, "slug"), arg(it, "id")) }
                 composable("playlist/{slug}/{id}") { PlaylistScreen(arg(it, "slug"), arg(it, "id")) }
                 composable("artist/{slug}/{id}") { ArtistScreen(arg(it, "slug"), arg(it, "id")) }
+                composable("genre/{slug}/{id}/{title}") { GenreScreen(arg(it, "slug"), arg(it, "id"), arg(it, "title").trim()) }
             }
             // La vista web que acuña tokens de YouTube: montada, pero invisible.
             Store.minter.view?.let { web ->

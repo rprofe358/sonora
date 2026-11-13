@@ -402,7 +402,7 @@ fn block<T>(future: impl Future<Output = anyhow::Result<T>>) -> Result<T, Mobile
     runtime().block_on(future).map_err(failed)
 }
 
-fn media(item_: &GenreItem) -> MediaItem {
+pub(super) fn media(item_: &GenreItem) -> MediaItem {
     match item_ {
         GenreItem::Track(track) => match item(track) {
             Some(track) => MediaItem::Track { track },

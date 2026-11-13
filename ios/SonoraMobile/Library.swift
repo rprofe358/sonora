@@ -7,6 +7,7 @@ enum Route: Hashable {
     case album(slug: String, id: String)
     case playlist(slug: String, id: String)
     case artist(slug: String, id: String)
+    case genre(slug: String, id: String, title: String)
 }
 
 private struct OpenRouteKey: EnvironmentKey {
@@ -34,6 +35,7 @@ struct RoutedStack<Content: View>: View {
                     case .album(let slug, let id): AlbumView(slug: slug, id: id)
                     case .playlist(let slug, let id): PlaylistView(slug: slug, id: id)
                     case .artist(let slug, let id): ArtistView(slug: slug, id: id)
+                    case .genre(let slug, let id, let title): GenreView(slug: slug, id: id, title: title)
                     }
                 }
         }
@@ -206,9 +208,16 @@ struct MediaCard: View {
                 card(playlist.cover, playlist.title, playlist.owner)
             }
             .buttonStyle(.plain)
-        case .genre(_, let title, let cover):
-            card(cover, title, "")
-                .opacity(0.6)
+        case .genre(let id, let title, let cover):
+            if id.isEmpty {
+                card(cover, title, "")
+                    .opacity(0.6)
+            } else {
+                Button { open(.genre(slug: slug, id: id, title: title)) } label: {
+                    card(cover, title, "Género")
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
@@ -374,6 +383,7 @@ private struct HomeFeed: View {
                 if let pick {
                     Hero(item: pick, shelves: data.shelves, slug: slug)
                 }
+                MixesRow(slug: slug)
                 if !data.liked.isEmpty {
                     row("Tus me gusta") {
                         ForEach(Array(data.liked.prefix(30).enumerated()), id: \.offset) { index, track in
@@ -430,6 +440,151 @@ private struct HomeFeed: View {
             if case .track = $0 { return true }
             return false
         }
+    }
+}
+
+/// Los mixes del día: una fila de tarjetas que tocan el mix entero.
+private struct MixesRow: View {
+    @EnvironmentObject private var store: Store
+    let slug: String
+    @State private var mixes: [Mix]?
+
+    var body: some View {
+        Group {
+            if let mixes, mixes.isEmpty {
+                EmptyView()
+            } else {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Mixes para ti").font(.title3.bold()).padding(.horizontal)
+                    if let mixes {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            LazyHStack(alignment: .top, spacing: 12) {
+                                ForEach(Array(mixes.enumerated()), id: \.offset) { _, mix in
+                                    MixCard(mix: mix) { store.play(mix.tracks, at: 0, from: slug) }
+                                }
+                            }
+                            .padding(.horizontal)
+                        }
+                    } else {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Armando tus mixes…").foregroundStyle(.secondary)
+                        }
+                        .padding(.horizontal)
+                    }
+                }
+            }
+        }
+        .task(id: slug) {
+            let engine = store.engine
+            let found = await Task.detached { (try? engine.dailyMixes(slug: slug)) ?? [] }.value
+            mixes = found
+        }
+    }
+}
+
+private struct MixCard: View {
+    let mix: Mix
+    let play: () -> Void
+
+    var body: some View {
+        Button(action: play) {
+            VStack(alignment: .leading, spacing: 6) {
+                ZStack(alignment: .bottomLeading) {
+                    Cover(url: mix.cover, size: 156)
+                    LinearGradient(colors: [.clear, .accentColor.opacity(0.85)], startPoint: .center, endPoint: .bottom)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                    Text(mix.title)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .padding(10)
+                }
+                .frame(width: 156, height: 156)
+                if !mix.subtitle.isEmpty {
+                    Text(mix.subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+            }
+            .frame(width: 156, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// La página de un género: filas de playlists y álbumes.
+struct GenreView: View {
+    let slug: String
+    let id: String
+    let title: String
+
+    var body: some View {
+        Loader(key: "genre-\(slug)-\(id)", load: { try $0.genre(slug: slug, id: id) }) { shelves in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 24) {
+                    if shelves.isEmpty {
+                        Text("Este género no tiene nada para mostrar.").foregroundStyle(.secondary).padding()
+                    }
+                    ForEach(Array(shelves.enumerated()), id: \.offset) { _, shelf in
+                        ShelfView(shelf: shelf, slug: slug)
+                    }
+                }
+                .padding(.vertical)
+            }
+        }
+        .navigationTitle(title.isEmpty ? "Explorar" : title)
+    }
+}
+
+/// Explorar: los géneros y estados de ánimo del servicio, de dos en dos.
+struct ExploreGrid: View {
+    @EnvironmentObject private var store: Store
+    @Environment(\.openRoute) private var open
+    let slug: String
+    @State private var genres: [GenreTile] = []
+
+    private static let colors: [Color] = [
+        Color(red: 0.91, green: 0.45, blue: 0.17), Color(red: 0.12, green: 0.53, blue: 0.90),
+        Color(red: 0.18, green: 0.49, blue: 0.20), Color(red: 0.49, green: 0.34, blue: 0.76),
+        Color(red: 0.85, green: 0.11, blue: 0.38), Color(red: 0.0, green: 0.54, blue: 0.48),
+        Color(red: 0.43, green: 0.30, blue: 0.25), Color(red: 0.22, green: 0.29, blue: 0.67),
+    ]
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+            ForEach(genres, id: \.id) { genre in
+                Button { open(.genre(slug: slug, id: genre.id, title: genre.title)) } label: {
+                    tile(genre)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .task(id: slug) {
+            let engine = store.engine
+            genres = await Task.detached { (try? engine.genres(slug: slug)) ?? [] }.value
+        }
+    }
+
+    private func tile(_ genre: GenreTile) -> some View {
+        let color = Self.colors[abs(genre.title.unicodeScalars.reduce(0) { $0 &+ Int($1.value) }) % Self.colors.count]
+        return ZStack(alignment: .topLeading) {
+            color
+            if let cover = genre.cover {
+                Cover(url: cover, size: 70)
+                    .rotationEffect(.degrees(22))
+                    .offset(x: 14, y: 8)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+            }
+            Text(genre.title)
+                .font(.headline)
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .padding(12)
+        }
+        .frame(height: 92)
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
@@ -505,7 +660,14 @@ private struct Hero: View {
         .task(id: cover) {
             guard let cover else { return }
             image = ImagePipeline.shared.cached(cover)
-            if image == nil { image = await ImagePipeline.shared.image(cover) }
+            // la portada más grande que dé el servicio, para que no se vea pixelada
+            let engine = store.engine
+            let big = await Task.detached { engine.coverFull(slug: slug, url: cover) }.value
+            if let sharp = await ImagePipeline.shared.image(big) {
+                image = sharp
+            } else if image == nil {
+                image = await ImagePipeline.shared.image(cover)
+            }
         }
     }
 

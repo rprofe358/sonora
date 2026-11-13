@@ -113,6 +113,8 @@ object Routes {
     fun album(slug: String, id: String) = "album/${Uri.encode(slug)}/${Uri.encode(id)}"
     fun playlist(slug: String, id: String) = "playlist/${Uri.encode(slug)}/${Uri.encode(id)}"
     fun artist(slug: String, id: String) = "artist/${Uri.encode(slug)}/${Uri.encode(id)}"
+    fun genre(slug: String, id: String, title: String) =
+        "genre/${Uri.encode(slug)}/${Uri.encode(id)}/${Uri.encode(title.ifEmpty { " " })}"
 }
 
 /** Una portada. `under` (la miniatura ya cargada) se ve mientras llega `url`, la grande. */
@@ -404,7 +406,11 @@ fun MediaCard(item: MediaItem, slug: String, size: Dp = 140.dp, onPlay: () -> Un
             Modifier.focusRing().clickable { nav.navigate(Routes.artist(slug, item.artist.id)) }, round = true, size = size)
         is MediaItem.Playlist -> Card(item.playlist.cover, item.playlist.title, item.playlist.owner,
             Modifier.focusRing().clickable { nav.navigate(Routes.playlist(slug, item.playlist.id)) }, size = size)
-        is MediaItem.Genre -> Card(item.cover, item.title, "", Modifier.alpha(0.6f), size = size)
+        is MediaItem.Genre -> if (item.id.isEmpty()) {
+            Card(item.cover, item.title, "", Modifier.alpha(0.6f), size = size)
+        } else {
+            Card(item.cover, item.title, "Género", Modifier.focusRing().clickable { nav.navigate(Routes.genre(slug, item.id, item.title)) }, size = size)
+        }
     }
 }
 

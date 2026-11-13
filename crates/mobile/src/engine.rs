@@ -22,6 +22,7 @@ mod library;
 mod lyrics;
 mod scrobble;
 mod session;
+mod mixes;
 mod settings;
 mod shuffle;
 
@@ -142,7 +143,7 @@ pub enum Prompt {
 }
 
 /// Una canción tal como la ve la app.
-#[derive(Clone, Debug, PartialEq, uniffi::Record)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, uniffi::Record)]
 pub struct TrackItem {
     pub id: String,
     pub title: String,
@@ -1174,6 +1175,13 @@ impl Inner {
                 *last = Some(id);
                 drop(last);
                 lyrics::prefetch(self);
+                if !self.remote() {
+                    let queue = lock(&self.queue);
+                    if let (Some(slug), Some(track)) = (queue.slug.clone(), queue.tracks.get(queue.index).cloned()) {
+                        drop(queue);
+                        mixes::record(&slug, &track);
+                    }
+                }
                 if !self.remote()
                     && let Some(this) = self.this.upgrade()
                 {
