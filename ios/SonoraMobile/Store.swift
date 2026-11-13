@@ -265,6 +265,22 @@ final class Store: ObservableObject {
         }
     }
 
+    /// Toca una canción y detrás pone las parecidas en género y ritmo (la radio de esa canción),
+    /// en vez de la lista donde estaba. Suena enseguida; las parecidas llegan un momento después.
+    func playSimilar(_ track: TrackItem, from slug: String) {
+        Task {
+            if case .failure(let error) = await run({ try $0.playQueue(slug: slug, tracks: [track], index: 0) }) {
+                problem = describe(error)
+                return
+            }
+            guard case .success(let found) = await run({ try $0.radio(slug: slug, trackId: track.id) }) else { return }
+            let rest = found.filter { $0.id != track.id }
+            // si mientras tanto se puso otra cosa, no se toca esa cola
+            guard !rest.isEmpty, state.track?.id == track.id else { return }
+            _ = await run { try $0.enqueue(slug: slug, tracks: rest, next: false) }
+        }
+    }
+
     func startRadio(_ track: TrackItem, from slug: String) {
         Task {
             switch await run({ try $0.radio(slug: slug, trackId: track.id) }) {

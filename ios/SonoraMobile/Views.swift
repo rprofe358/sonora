@@ -35,7 +35,7 @@ struct SearchView: View {
                     }
                     if !results.tracks.isEmpty {
                         Section("Canciones") {
-                            TrackList(tracks: results.tracks, slug: searchedIn)
+                            TrackList(tracks: results.tracks, slug: searchedIn, similar: true)
                         }
                     }
                     if !results.albums.isEmpty {
@@ -141,11 +141,17 @@ struct TrackList: View {
     var covers = true
     /// Si se da, deslizar una canción la quita (playlists propias).
     var onRemove: ((Int) -> Void)? = nil
+    /// Tocar una suena seguida de parecidas (búsqueda), en vez de seguir con esta lista.
+    var similar = false
 
     var body: some View {
         ForEach(Array(tracks.enumerated()), id: \.offset) { index, track in
             Button {
-                store.play(tracks, at: index, from: slug)
+                if similar {
+                    store.playSimilar(track, from: slug)
+                } else {
+                    store.play(tracks, at: index, from: slug)
+                }
             } label: {
                 TrackRow(
                     track: track,

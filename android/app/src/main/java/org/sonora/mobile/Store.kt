@@ -148,6 +148,24 @@ object Store : EngineListener {
         run { it.enqueue(slug, tracks, next) }.onFailure { problem = describe(it) }
     }
 
+    /**
+     * Toca una canción y detrás pone las parecidas en género y ritmo (la radio de esa canción),
+     * en vez de la lista donde estaba. Suena enseguida; las parecidas llegan un momento después.
+     */
+    fun playSimilar(track: TrackItem, slug: String) = launch {
+        run { it.playQueue(slug, listOf(track), 0u) }.onFailure {
+            problem = describe(it)
+            return@launch
+        }
+        run { it.radio(slug, track.id) }.onSuccess { found ->
+            val rest = found.filter { it.id != track.id }
+            // si mientras tanto se puso otra cosa, no se toca esa cola
+            if (rest.isNotEmpty() && state?.track?.id == track.id) {
+                run { it.enqueue(slug, rest, false) }
+            }
+        }
+    }
+
     fun startRadio(track: TrackItem, slug: String) = launch {
         run { it.radio(slug, track.id) }
             .onSuccess { found ->

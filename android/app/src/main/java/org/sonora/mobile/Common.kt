@@ -233,6 +233,8 @@ fun LazyListScope.trackItems(
     numbered: Boolean = false,
     covers: Boolean = true,
     onRemove: ((Int) -> Unit)? = null,
+    /** Tocar una suena seguida de parecidas (búsqueda), en vez de seguir con esta lista. */
+    similar: Boolean = false,
 ) {
     itemsIndexed(tracks, key = { index, track -> "$index-${track.id}" }) { index, track ->
         val state = Store.state
@@ -242,7 +244,7 @@ fun LazyListScope.trackItems(
             current = state?.provider == slug && state.track?.id == track.id,
             number = if (numbered) index + 1 else null,
             cover = covers,
-            onClick = { Store.play(tracks, index, slug) },
+            onClick = { if (similar) Store.playSimilar(track, slug) else Store.play(tracks, index, slug) },
             onRemove = onRemove?.let { { it(index) } },
         )
     }

@@ -416,7 +416,7 @@ fun SearchScreen() {
                     }
                     if (found.tracks.isNotEmpty()) {
                         item { SectionTitle("Canciones") }
-                        trackItems(found.tracks, searchedIn)
+                        trackItems(found.tracks, searchedIn, similar = true)
                     }
                     if (found.albums.isNotEmpty()) {
                         item { SectionTitle("Álbumes") }
