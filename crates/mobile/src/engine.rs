@@ -23,6 +23,7 @@ mod lyrics;
 mod scrobble;
 mod session;
 mod settings;
+mod shuffle;
 
 pub use library::*;
 pub use lyrics::*;
@@ -180,6 +181,8 @@ pub struct PlaybackState {
     pub remote: bool,
     /// La portada de lo que suena en su mayor tamaño, para el reproductor a pantalla completa.
     pub cover_large: Option<String>,
+    /// El modo aleatorio por género está encendido.
+    pub shuffle: bool,
 }
 
 /// Lo que Swift implementa para enterarse de lo que pasa en el motor.
@@ -230,7 +233,8 @@ impl Engine {
             )),
         ];
         Arc::new(Self {
-            inner: Arc::new(Inner {
+            inner: Arc::new_cyclic(|this| Inner {
+                this: this.clone(),
                 listener,
                 providers,
                 sessions: Mutex::default(),
@@ -249,6 +253,7 @@ impl Engine {
                 liked: Mutex::default(),
                 prefetched: Mutex::default(),
                 spectrum: Mutex::default(),
+                shuffle: Mutex::default(),
             }),
         })
     }
@@ -681,6 +686,55 @@ impl Engine {
         })
     }
 
+    /// Enciende o apaga el aleatorio por género: con él, la siguiente canción es siempre una
+    /// parecida a la que suena, elegida al azar, en lugar de lo que había en la cola.
+    pub fn set_shuffle(&self, on: bool) {
+        lock(&self.inner.shuffle).on = on;
+        if on {
+            shuffle::advance(&self.inner);
+        }
+        self.inner.notify();
+    }
+
+    /// Mueve una canción de la cola de un puesto a otro (los índices cuentan desde la primera de
+    /// la cola, como los de `queue`). La que suena puede moverse y sigue sonando.
+    pub fn move_in_queue(&self, from: u32, to: u32) {
+        let (from, to) = (from as usize, to as usize);
+        if from == to {
+            return;
+        }
+        if self.inner.remote() {
+            // en la sesión, la que suena es la 0 y no se mueve
+            return self.inner.remote_change(move |state| {
+                let length = state.upcoming.len();
+                if from >= 1 && to >= 1 && from <= length && to <= length {
+                    let track = state.upcoming.remove(from - 1);
+                    state.upcoming.insert(to - 1, track);
+                }
+            });
+        }
+        let mut queue = lock(&self.inner.queue);
+        let length = queue.tracks.len();
+        if from >= length || to >= length {
+            return;
+        }
+        let track = queue.tracks.remove(from);
+        queue.tracks.insert(to, track);
+        let index = queue.index;
+        queue.index = if from == index {
+            to
+        } else if from < index && to >= index {
+            index - 1
+        } else if from > index && to <= index {
+            index + 1
+        } else {
+            index
+        };
+        queue.preloaded = false;
+        drop(queue);
+        self.inner.notify();
+    }
+
     /// Vacía lo que viene después de la canción actual, que sigue sonando.
     pub fn clear_queue(&self) {
         if self.inner.remote() {
@@ -797,6 +851,10 @@ struct Inner {
     prefetched: Mutex<Option<String>>,
     /// Mientras el visualizador está a la vista, el reproductor analiza lo que suena.
     spectrum: Mutex<Option<music::Listening>>,
+    /// El modo aleatorio por género y las canciones recientes.
+    shuffle: Mutex<shuffle::Shuffle>,
+    /// Este mismo `Inner`, para lo que sigue trabajando en segundo plano.
+    this: std::sync::Weak<Inner>,
 }
 
 impl Inner {
@@ -1085,6 +1143,7 @@ impl Inner {
                 volume: *lock(&self.level),
                 remote: false,
                 cover_large: None,
+                shuffle: lock(&self.shuffle).on,
             }
         };
         state.cover_large = self.large_cover(&state);
@@ -1115,6 +1174,11 @@ impl Inner {
                 *last = Some(id);
                 drop(last);
                 lyrics::prefetch(self);
+                if !self.remote()
+                    && let Some(this) = self.this.upgrade()
+                {
+                    shuffle::advance(&this);
+                }
             }
         }
     }

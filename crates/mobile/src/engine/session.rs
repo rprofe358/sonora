@@ -986,6 +986,7 @@ impl Inner {
             volume: *lock(&self.level),
             remote: true,
             cover_large: None,
+            shuffle: false,
         };
         state.cover_large = self.large_cover(&state);
         Some(state)

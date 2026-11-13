@@ -1,6 +1,14 @@
 package org.sonora.mobile
 
 import android.app.Activity
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.material.icons.filled.DragHandle
+import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.zIndex
 import android.os.SystemClock
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.text.AnnotatedString
@@ -440,6 +448,8 @@ private fun Controls(state: PlaybackState, play: FocusRequester) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
+        // a la izquierda, del mismo ancho que el aleatorio, para que play quede en el centro
+        if (!state.remote) Spacer(Modifier.size(48.dp))
         if (tv) IconButton(onClick = { skip(state, -10_000) }) { Icon(Icons.Filled.Replay10, "Atrás 10 segundos") }
         IconButton(onClick = { Store.engine.previous() }, modifier = Modifier.size(56.dp)) {
             Icon(Icons.Filled.SkipPrevious, "Anterior", Modifier.size(40.dp))
@@ -451,6 +461,26 @@ private fun Controls(state: PlaybackState, play: FocusRequester) {
             modifier = Modifier.size(56.dp),
         ) { Icon(Icons.Filled.SkipNext, "Siguiente", Modifier.size(40.dp)) }
         if (tv) IconButton(onClick = { skip(state, 10_000) }) { Icon(Icons.Filled.Forward10, "Adelante 10 segundos") }
+        if (!state.remote) ShuffleButton(state.shuffle)
+    }
+}
+
+/**
+ * Aleatorio por género: encendido, la siguiente es siempre una canción parecida a la que suena,
+ * elegida al azar (reemplaza lo que hubiera en la cola).
+ */
+@Composable
+private fun ShuffleButton(on: Boolean) {
+    val color = LocalContentColor.current
+    IconButton(onClick = { Store.engine.setShuffle(!on) }) {
+        Box(contentAlignment = Alignment.BottomCenter) {
+            Icon(
+                Icons.Filled.Shuffle,
+                if (on) "Apagar aleatorio por género" else "Aleatorio por género",
+                tint = if (on) color else color.copy(alpha = 0.5f),
+            )
+            if (on) Box(Modifier.offset(y = 8.dp).size(4.dp).background(color, RoundedCornerShape(50)))
+        }
     }
 }
 
@@ -777,14 +807,42 @@ private fun skip(state: PlaybackState, by: Long) {
     Store.engine.seek(target.toULong())
 }
 
+/** Una canción de la cola con un id propio, para seguirla al arrastrarla aunque se repita. */
+private data class Entry(val id: Int, val track: TrackItem)
+
+/**
+ * La cola: tocar una canción salta a ella, la ✕ la quita y el asa de la derecha (≡) la arrastra a
+ * otro puesto. Al soltar se le dice al motor de dónde a dónde se movió.
+ */
 @Composable
 private fun QueueList(modifier: Modifier) {
     val state = Store.state
-    // se vuelve a leer cada vez que cambia el estado (salto, quitar, agregar, siguiente)
-    val queue = remember(state?.index, state?.queueLength, state?.track?.id) { Store.engine.queue() }
-    val current = state?.index?.toInt() ?: 0
+    // se vuelve a leer cada vez que cambia el estado (salto, quitar, agregar, mover, siguiente)
+    val queue = remember(state?.index, state?.queueLength, state?.track?.id) {
+        Store.engine.queue().mapIndexed { index, track -> Entry(index, track) }
+    }
+    var entries by remember(queue) { mutableStateOf(queue) }
+    val playing = queue.getOrNull(state?.index?.toInt() ?: 0)?.id
+    var dragged by remember { mutableStateOf<Int?>(null) }
+    var from by remember { mutableIntStateOf(-1) }
+    var offset by remember { mutableFloatStateOf(0f) }
+    var rowHeight by remember { mutableFloatStateOf(1f) }
+    val current = entries.indexOfFirst { it.id == playing }.coerceAtLeast(0)
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (current - 2).coerceAtLeast(0))
-    if (queue.size <= current + 1) {
+
+    fun finish(cancelled: Boolean) {
+        val to = entries.indexOfFirst { it.id == dragged }
+        if (!cancelled && from >= 0 && to >= 0 && from != to) {
+            Store.engine.moveInQueue(from.toUInt(), to.toUInt())
+        } else if (cancelled) {
+            entries = queue
+        }
+        dragged = null
+        from = -1
+        offset = 0f
+    }
+
+    if (entries.size <= current + 1) {
         Text(
             "No hay nada después de esta canción. Toca «Agregar» para sumar más.",
             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -792,22 +850,34 @@ private fun QueueList(modifier: Modifier) {
         )
     }
     LazyColumn(state = list, modifier = modifier) {
-        itemsIndexed(queue, key = { index, track -> "$index-${track.id}" }) { index, track ->
+        itemsIndexed(entries, key = { _, entry -> entry.id }) { index, entry ->
+            val track = entry.track
+            val moving = dragged == entry.id
             Row(
                 Modifier
                     .fillMaxWidth()
+                    .onSizeChanged { rowHeight = it.height.toFloat().coerceAtLeast(1f) }
+                    .zIndex(if (moving) 1f else 0f)
+                    .graphicsLayer {
+                        translationY = if (moving) offset else 0f
+                        shadowElevation = if (moving) 12f else 0f
+                    }
                     .background(
-                        if (index == current) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                        when {
+                            moving -> MaterialTheme.colorScheme.surfaceContainerHigh
+                            index == current -> MaterialTheme.colorScheme.secondaryContainer
+                            else -> Color.Transparent
+                        },
                         RoundedCornerShape(10.dp),
                     )
                     .focusRing()
-                    .clickable { Store.engine.jump(index.toUInt()) }
+                    .clickable { Store.engine.jump(queue.indexOfFirst { it.id == entry.id }.coerceAtLeast(0).toUInt()) }
                     .padding(start = 8.dp, top = 6.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Cover(track.cover, 44.dp)
-                Column(Modifier.weight(1f)) {
+                Column(Modifier.weight(1f).padding(start = 4.dp)) {
                     Text(
                         track.title, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         fontWeight = if (index == current) FontWeight.SemiBold else FontWeight.Normal,
@@ -819,12 +889,46 @@ private fun QueueList(modifier: Modifier) {
                     )
                 }
                 if (index == current) {
-                    Icon(Icons.Filled.MusicNote, null, Modifier.padding(end = 12.dp))
+                    Icon(Icons.Filled.MusicNote, "Sonando", Modifier.padding(horizontal = 12.dp))
                 } else {
-                    IconButton(onClick = { Store.engine.removeFromQueue(index.toUInt()) }) {
+                    IconButton(onClick = {
+                        Store.engine.removeFromQueue(queue.indexOfFirst { it.id == entry.id }.coerceAtLeast(0).toUInt())
+                    }) {
                         Icon(Icons.Filled.Close, "Quitar de la cola")
                     }
                 }
+                Icon(
+                    Icons.Filled.DragHandle,
+                    "Arrastrar para mover",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .padding(10.dp)
+                        .pointerInput(entry.id) {
+                            detectDragGestures(
+                                onDragStart = {
+                                    dragged = entry.id
+                                    from = entries.indexOfFirst { it.id == entry.id }
+                                    offset = 0f
+                                },
+                                onDrag = { change, amount ->
+                                    change.consume()
+                                    offset += amount.y
+                                    val at = entries.indexOfFirst { it.id == dragged }
+                                    if (at < 0) return@detectDragGestures
+                                    val target = when {
+                                        offset > rowHeight / 2 && at < entries.lastIndex -> at + 1
+                                        offset < -rowHeight / 2 && at > 0 -> at - 1
+                                        else -> return@detectDragGestures
+                                    }
+                                    entries = entries.toMutableList().apply { add(target, removeAt(at)) }
+                                    offset += if (target > at) -rowHeight else rowHeight
+                                },
+                                onDragEnd = { finish(cancelled = false) },
+                                onDragCancel = { finish(cancelled = true) },
+                            )
+                        },
+                )
             }
         }
     }

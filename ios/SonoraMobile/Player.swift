@@ -247,18 +247,48 @@ struct PlayerView: View {
     }
 
     private func controls(_ state: PlaybackState) -> some View {
-        HStack(spacing: 44) {
+        HStack(spacing: 0) {
+            // del mismo ancho que el aleatorio, para que play quede en el centro
+            Color.clear.frame(width: 44, height: 44)
+            Spacer()
             Button { store.engine.previous() } label: {
                 Image(systemName: "backward.fill").font(.system(size: 30))
             }
+            Spacer()
             PlayButton(status: state.status, size: 44) { store.engine.toggle() }
+            Spacer()
             Button { store.engine.next() } label: {
                 Image(systemName: "forward.fill").font(.system(size: 30))
             }
             .disabled(state.index + 1 >= state.queueLength)
+            Spacer()
+            shuffleButton(state)
         }
         .buttonStyle(.plain)
         .foregroundStyle(fg)
+    }
+
+    /// Aleatorio por género: encendido, la siguiente es siempre una canción parecida a la que
+    /// suena, elegida al azar (reemplaza lo que hubiera en la cola).
+    @ViewBuilder
+    private func shuffleButton(_ state: PlaybackState) -> some View {
+        if state.remote {
+            Color.clear.frame(width: 44, height: 44)
+        } else {
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                store.engine.setShuffle(on: !state.shuffle)
+            } label: {
+                VStack(spacing: 3) {
+                    Image(systemName: "shuffle").font(.system(size: 20, weight: .semibold))
+                    Circle().frame(width: 4, height: 4).opacity(state.shuffle ? 1 : 0)
+                }
+                .opacity(state.shuffle ? 1 : 0.5)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+            }
+            .accessibilityLabel(state.shuffle ? "Apagar aleatorio por género" : "Aleatorio por género")
+        }
     }
 
     /// En «solo controlar» se avisa de que la música suena en otro lado. El volumen va con los
@@ -454,9 +484,12 @@ extension UIImage {
 
 // MARK: - Cola
 
+/// La cola: tocar salta a la canción, deslizar a la izquierda la quita, y con «Ordenar» se
+/// arrastran por el asa (≡) a otro puesto o se quitan con el botón rojo.
 struct QueuePanel: View {
     @EnvironmentObject private var store: Store
     let onAdd: () -> Void
+    @State private var editing: EditMode = .inactive
 
     var body: some View {
         let queue = store.engine.queue()
@@ -466,8 +499,14 @@ struct QueuePanel: View {
                 Text("Cola").font(.title3.bold())
                 Spacer()
                 Button(action: onAdd) { Label("Agregar", systemImage: "plus") }
+                Button {
+                    withAnimation { editing = editing.isEditing ? .inactive : .active }
+                } label: {
+                    Label(editing.isEditing ? "Listo" : "Ordenar", systemImage: editing.isEditing ? "checkmark" : "arrow.up.arrow.down")
+                }
                 Button { store.engine.clearQueue() } label: { Label("Limpiar", systemImage: "xmark.bin") }
             }
+            .labelStyle(.iconOnly)
             .buttonStyle(.bordered)
             .font(.subheadline)
             if queue.count <= current + 1 {
@@ -493,8 +532,15 @@ struct QueuePanel: View {
                             store.engine.removeFromQueue(index: UInt32(index))
                         }
                     }
+                    .onMove { source, destination in
+                        guard let from = source.first else { return }
+                        // `destination` cuenta el hueco antes de quitar la que se mueve
+                        let to = destination > from ? destination - 1 : destination
+                        store.engine.moveInQueue(from: UInt32(from), to: UInt32(to))
+                    }
                 }
                 .listStyle(.plain)
+                .environment(\.editMode, $editing)
                 .scrollContentBackground(.hidden)
                 .onAppear { proxy.scrollTo(max(0, current - 1), anchor: .top) }
             }
