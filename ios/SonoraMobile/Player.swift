@@ -26,8 +26,9 @@ struct PlayerView: View {
     var body: some View {
         let state = store.state
         GeometryReader { geometry in
-            if geometry.size.width > geometry.size.height {
-                landscape(state, height: geometry.size.height)
+            // de lado, o en una pantalla ancha (iPad): dos columnas
+            if geometry.size.width > geometry.size.height || geometry.size.width >= 700 {
+                landscape(state, size: geometry.size)
             } else {
                 portrait(state)
             }
@@ -82,14 +83,15 @@ struct PlayerView: View {
     }
 
     /// De lado: portada y controles a la izquierda, letra (o cola, o sesión) a la derecha.
-    private func landscape(_ state: PlaybackState, height: CGFloat) -> some View {
-        HStack(spacing: 24) {
+    private func landscape(_ state: PlaybackState, size: CGSize) -> some View {
+        let height = size.height
+        return HStack(spacing: 24) {
             ScrollView {
                 VStack(spacing: 10) {
                     Cover(
                         url: state.coverLarge ?? state.track?.cover,
                         // lo que dejan el título, la barra y los botones, para que todo quepa
-                        size: max(90, min(height * 0.45, height - 270)),
+                        size: max(90, min(height * 0.45, height - 270, size.width * 0.4)),
                         fallback: state.track?.cover
                     )
                     .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
