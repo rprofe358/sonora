@@ -3,6 +3,18 @@
 package org.sonora.mobile
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextOverflow
+import coil3.compose.AsyncImage
+import uniffi.sonora_mobile.PlaylistItem
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -76,23 +88,171 @@ import uniffi.sonora_mobile.TrackItem
 
 // ── Inicio ─────────────────────────────────────────────────────────────────────────────────
 
+/** Lo que muestra Inicio: el feed del servicio y lo propio (me gusta y playlists). */
+private class HomeData(val shelves: List<Shelf>, val liked: List<TrackItem>, val playlists: List<PlaylistItem>)
+
+/** El tamaño de las tarjetas de Inicio: caben tres y asoma la cuarta. */
+private val homeCard = 124.dp
+
 @Composable
 fun HomeScreen() {
-    Column(Modifier.fillMaxSize()) {
-        Bar("Inicio")
-        if (Store.signedIn.isEmpty()) {
-            NeedsAccount()
-            return@Column
-        }
-        val slug = Store.selected
-        Loader(key = slug, load = { it.home(slug) }) { shelves ->
-            LazyColumn(Modifier.fillMaxSize()) {
-                item { ProviderPicker() }
-                if (shelves.isEmpty()) {
-                    item { Text("Este servicio no tiene página de inicio para esta cuenta.", Modifier.padding(16.dp)) }
+    val slug = Store.selected
+    Box(Modifier.fillMaxSize()) {
+        // el color del tema se asoma arriba, detrás del saludo
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(260.dp)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.35f), Color.Transparent),
+                    ),
+                ),
+        )
+        Column(Modifier.fillMaxSize()) {
+            if (Store.signedIn.isEmpty()) {
+                Greeting()
+                NeedsAccount()
+                return@Column
+            }
+            Loader(key = "home-$slug-${Store.libraryRevision}", load = { engine ->
+                HomeData(
+                    shelves = engine.home(slug),
+                    liked = runCatching { engine.libraryTracks(slug) }.getOrDefault(emptyList()),
+                    playlists = runCatching { engine.libraryPlaylists(slug) }.getOrDefault(emptyList()),
+                )
+            }) { data ->
+                val pick = remember(data) { recommendation(data.shelves) }
+                LazyColumn(Modifier.fillMaxSize()) {
+                    item { Greeting() }
+                    item { ProviderPicker() }
+                    pick?.let { item { Hero(it, data.shelves, slug) } }
+                    if (data.liked.isNotEmpty()) {
+                        item { SectionTitle("Tus me gusta") }
+                        item {
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                itemsIndexed(data.liked.take(30)) { index, track ->
+                                    MediaCard(MediaItem.Track(track), slug, homeCard) { Store.play(data.liked, index, slug) }
+                                }
+                            }
+                        }
+                    }
+                    if (data.playlists.isNotEmpty()) {
+                        item { SectionTitle("Tus playlists") }
+                        item {
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 12.dp),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                items(data.playlists) { MediaCard(MediaItem.Playlist(it), slug, homeCard) {} }
+                            }
+                        }
+                    }
+                    if (data.shelves.isEmpty() && data.liked.isEmpty() && data.playlists.isEmpty()) {
+                        item { Text("Este servicio no tiene página de inicio para esta cuenta.", Modifier.padding(16.dp)) }
+                    }
+                    items(data.shelves) { shelf -> ShelfRow(shelf, slug) }
+                    item { Spacer(Modifier.size(16.dp)) }
                 }
-                items(shelves) { shelf -> ShelfRow(shelf, slug) }
-                item { Spacer(Modifier.size(16.dp)) }
+            }
+        }
+    }
+}
+
+/** «Hola, …» con el nombre de Ajustes › Personalización, y un saludo según la hora. */
+@Composable
+private fun Greeting() {
+    val hour = remember { java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY) }
+    val moment = when (hour) {
+        in 5..11 -> "Buenos días"
+        in 12..18 -> "Buenas tardes"
+        else -> "Buenas noches"
+    }
+    val name = Store.userName
+    Column(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)) {
+        Text(
+            if (name.isEmpty()) "Hola 👋" else "Hola, $name",
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(moment, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** Lo que se recomienda en grande: al azar entre los álbumes y playlists del principio del feed. */
+private fun recommendation(shelves: List<Shelf>): MediaItem? {
+    val near = shelves.take(3).flatMap { it.items }
+    val big = near.filter { it is MediaItem.Album || it is MediaItem.Playlist }
+    return big.randomOrNull() ?: near.firstOrNull { it is MediaItem.Track }
+}
+
+/** La tarjeta grande de arriba: portada de fondo, título y un botón para escuchar. */
+@Composable
+private fun Hero(item: MediaItem, shelves: List<Shelf>, slug: String) {
+    val nav = LocalNav.current
+    val (cover, title, subtitle) = when (item) {
+        is MediaItem.Album -> Triple(item.album.coverLarge ?: item.album.cover, item.album.title, item.album.artists)
+        is MediaItem.Playlist -> Triple(item.playlist.cover, item.playlist.title, item.playlist.owner)
+        is MediaItem.Track -> Triple(item.track.cover, item.track.title, item.track.artists)
+        else -> return
+    }
+    fun open() {
+        when (item) {
+            is MediaItem.Album -> nav.navigate(Routes.album(slug, item.album.id))
+            is MediaItem.Playlist -> nav.navigate(Routes.playlist(slug, item.playlist.id))
+            is MediaItem.Track -> {
+                val tracks = shelves.flatMap { shelf -> shelf.items.mapNotNull { (it as? MediaItem.Track)?.track } }
+                Store.play(tracks, tracks.indexOfFirst { it.id == item.track.id }.coerceAtLeast(0), slug)
+            }
+            else -> {}
+        }
+    }
+    Box(
+        Modifier
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+            .fillMaxWidth()
+            .height(210.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .focusRing(RoundedCornerShape(20.dp))
+            .clickable { open() },
+    ) {
+        cover?.let {
+            AsyncImage(
+                model = fixUrl(it),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.75f))),
+            ),
+        )
+        Row(
+            Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text("Te recomendamos", style = MaterialTheme.typography.labelMedium, color = Color.White.copy(alpha = 0.8f))
+                Text(
+                    title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (subtitle.isNotEmpty()) {
+                    Text(subtitle, color = Color.White.copy(alpha = 0.8f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+            FilledIconButton(onClick = { open() }, modifier = Modifier.size(52.dp)) {
+                Icon(Icons.Filled.PlayArrow, "Escuchar", Modifier.size(30.dp))
             }
         }
     }
@@ -102,11 +262,11 @@ fun HomeScreen() {
 private fun ShelfRow(shelf: Shelf, slug: String) {
     SectionTitle(shelf.title)
     LazyRow(
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(horizontal = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         itemsIndexed(shelf.items) { index, item ->
-            MediaCard(item, slug) {
+            MediaCard(item, slug, homeCard) {
                 // reproduce las canciones del estante, empezando por la que se tocó
                 val tracks = shelf.items.mapNotNull { (it as? MediaItem.Track)?.track }
                 val tapped = (shelf.items[index] as? MediaItem.Track)?.track ?: return@MediaCard

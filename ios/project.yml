@@ -3,6 +3,11 @@
 name: SonoraMobile
 options:
   bundleIdPrefix: com.rprofe358
+packages:
+  # La animación de entrada (splash.json, hecha en After Effects).
+  Lottie:
+    url: https://github.com/airbnb/lottie-spm.git
+    from: 4.5.0
   deploymentTarget:
     iOS: "16.0"
 targets:
@@ -43,6 +48,7 @@ targets:
         CODE_SIGNING_ALLOWED: NO
         CODE_SIGNING_REQUIRED: NO
     dependencies:
+      - package: Lottie
       - sdk: Security.framework
       - sdk: SystemConfiguration.framework
       - sdk: CoreFoundation.framework

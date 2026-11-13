@@ -180,6 +180,7 @@ struct MediaCard: View {
     @Environment(\.openRoute) private var open
     let item: MediaItem
     let slug: String
+    var size: CGFloat = 140
     let onPlay: () -> Void
 
     var body: some View {
@@ -213,7 +214,7 @@ struct MediaCard: View {
 
     private func card(_ cover: String?, _ title: String, _ subtitle: String, round: Bool = false) -> some View {
         VStack(alignment: round ? .center : .leading, spacing: 4) {
-            Cover(url: cover, size: 140, round: round)
+            Cover(url: cover, size: size, round: round)
             Text(title)
                 .font(.subheadline.weight(.medium))
                 .lineLimit(2)
@@ -225,7 +226,7 @@ struct MediaCard: View {
                     .lineLimit(1)
             }
         }
-        .frame(width: 140, alignment: round ? .center : .leading)
+        .frame(width: size, alignment: round ? .center : .leading)
         .contentShape(Rectangle())
     }
 
@@ -311,36 +312,223 @@ struct AlbumShelf: View {
 
 // MARK: - Inicio
 
+/// Lo que muestra Inicio: el feed del servicio y lo propio (me gusta y playlists).
+struct HomeData {
+    let shelves: [Shelf]
+    let liked: [TrackItem]
+    let playlists: [PlaylistItem]
+}
+
+/// El tamaño de las tarjetas de Inicio: caben tres y asoma la cuarta.
+private let homeCard: CGFloat = 112
+
 struct HomeView: View {
     @EnvironmentObject private var store: Store
 
     var body: some View {
         RoutedStack {
-            Group {
+            ZStack(alignment: .top) {
+                // el color del tema se asoma arriba, detrás del saludo
+                LinearGradient(
+                    colors: [store.palette.color.opacity(0.35), .clear],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: 320)
+                .ignoresSafeArea(edges: .top)
                 if store.signedIn.isEmpty {
-                    NeedsAccount()
+                    VStack(alignment: .leading) {
+                        Greeting()
+                        NeedsAccount()
+                    }
                 } else {
                     let slug = store.selected
-                    Loader(key: slug, load: { try $0.home(slug: slug) }) { shelves in
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 28) {
-                                ProviderPicker().padding(.horizontal)
-                                if shelves.isEmpty {
-                                    Text("Este servicio no tiene página de inicio para esta cuenta.")
-                                        .foregroundStyle(.secondary)
-                                        .padding()
-                                }
-                                ForEach(Array(shelves.enumerated()), id: \.offset) { _, shelf in
-                                    ShelfView(shelf: shelf, slug: slug)
-                                }
-                            }
-                            .padding(.vertical)
-                        }
+                    Loader(key: "home-\(slug)-\(store.libraryRevision)", load: { engine in
+                        HomeData(
+                            shelves: try engine.home(slug: slug),
+                            liked: (try? engine.libraryTracks(slug: slug)) ?? [],
+                            playlists: (try? engine.libraryPlaylists(slug: slug)) ?? []
+                        )
+                    }) { data in
+                        HomeFeed(data: data, slug: slug)
                     }
                 }
             }
-            .navigationTitle("Inicio")
+            .toolbar(.hidden, for: .navigationBar)
             .withPlayerBar()
+        }
+    }
+}
+
+private struct HomeFeed: View {
+    @EnvironmentObject private var store: Store
+    let data: HomeData
+    let slug: String
+    @State private var pick: MediaItem?
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 24) {
+                Greeting()
+                ProviderPicker().padding(.horizontal)
+                if let pick {
+                    Hero(item: pick, shelves: data.shelves, slug: slug)
+                }
+                if !data.liked.isEmpty {
+                    row("Tus me gusta") {
+                        ForEach(Array(data.liked.prefix(30).enumerated()), id: \.offset) { index, track in
+                            MediaCard(item: .track(track: track), slug: slug, size: homeCard) {
+                                store.play(data.liked, at: index, from: slug)
+                            }
+                        }
+                    }
+                }
+                if !data.playlists.isEmpty {
+                    row("Tus playlists") {
+                        ForEach(data.playlists, id: \.id) { playlist in
+                            MediaCard(item: .playlist(playlist: playlist), slug: slug, size: homeCard) {}
+                        }
+                    }
+                }
+                if data.shelves.isEmpty && data.liked.isEmpty && data.playlists.isEmpty {
+                    Text("Este servicio no tiene página de inicio para esta cuenta.")
+                        .foregroundStyle(.secondary)
+                        .padding()
+                }
+                ForEach(Array(data.shelves.enumerated()), id: \.offset) { _, shelf in
+                    ShelfView(shelf: shelf, slug: slug, size: homeCard)
+                }
+            }
+            .padding(.bottom)
+        }
+        .onAppear {
+            if pick == nil { pick = recommendation(data.shelves) }
+        }
+    }
+
+    private func row<Cards: View>(_ title: String, @ViewBuilder cards: () -> Cards) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title).font(.title3.bold()).padding(.horizontal)
+            ScrollView(.horizontal, showsIndicators: false) {
+                LazyHStack(alignment: .top, spacing: 10) { cards() }
+                    .padding(.horizontal)
+            }
+        }
+    }
+
+    /// Lo que se recomienda en grande: al azar entre los álbumes y playlists del principio del feed.
+    private func recommendation(_ shelves: [Shelf]) -> MediaItem? {
+        let near = shelves.prefix(3).flatMap(\.items)
+        let big = near.filter {
+            switch $0 {
+            case .album, .playlist: true
+            default: false
+            }
+        }
+        if let chosen = big.randomElement() { return chosen }
+        return near.first {
+            if case .track = $0 { return true }
+            return false
+        }
+    }
+}
+
+/// «Hola, …» con el nombre de Ajustes › Personalización, y un saludo según la hora.
+struct Greeting: View {
+    @EnvironmentObject private var store: Store
+
+    var body: some View {
+        let hour = Calendar.current.component(.hour, from: Date())
+        let moment = switch hour {
+        case 5..<12: "Buenos días"
+        case 12..<19: "Buenas tardes"
+        default: "Buenas noches"
+        }
+        VStack(alignment: .leading, spacing: 2) {
+            Text(store.userName.isEmpty ? "Hola 👋" : "Hola, \(store.userName)")
+                .font(.largeTitle.bold())
+            Text(moment).foregroundStyle(.secondary)
+        }
+        .padding(.horizontal)
+        .padding(.top, 12)
+    }
+}
+
+/// La tarjeta grande de arriba: portada de fondo, título y un botón para escuchar.
+private struct Hero: View {
+    @EnvironmentObject private var store: Store
+    @Environment(\.openRoute) private var open
+    let item: MediaItem
+    let shelves: [Shelf]
+    let slug: String
+    @State private var image: UIImage?
+
+    var body: some View {
+        let (cover, title, subtitle) = details
+        Button(action: go) {
+            ZStack(alignment: .bottomLeading) {
+                Color(.secondarySystemBackground)
+                if let image {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                }
+                LinearGradient(colors: [.clear, .black.opacity(0.75)], startPoint: .center, endPoint: .bottom)
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Te recomendamos")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.white.opacity(0.8))
+                        Text(title)
+                            .font(.title2.bold())
+                            .foregroundStyle(.white)
+                            .lineLimit(2)
+                        if !subtitle.isEmpty {
+                            Text(subtitle).foregroundStyle(.white.opacity(0.8)).lineLimit(1)
+                        }
+                    }
+                    Spacer()
+                    Image(systemName: "play.fill")
+                        .font(.title2)
+                        .foregroundStyle(.black)
+                        .frame(width: 52, height: 52)
+                        .background(.white, in: Circle())
+                }
+                .padding(16)
+            }
+            .frame(height: 210)
+            .frame(maxWidth: .infinity)
+            .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal)
+        .task(id: cover) {
+            guard let cover else { return }
+            image = ImagePipeline.shared.cached(cover)
+            if image == nil { image = await ImagePipeline.shared.image(cover) }
+        }
+    }
+
+    private var details: (String?, String, String) {
+        switch item {
+        case .album(let album): (album.coverLarge ?? album.cover, album.title, album.artists)
+        case .playlist(let playlist): (playlist.cover, playlist.title, playlist.owner)
+        case .track(let track): (track.cover, track.title, track.artists)
+        default: (nil, "", "")
+        }
+    }
+
+    private func go() {
+        switch item {
+        case .album(let album): open(.album(slug: slug, id: album.id))
+        case .playlist(let playlist): open(.playlist(slug: slug, id: playlist.id))
+        case .track(let track):
+            let tracks = shelves.flatMap(\.items).compactMap { item -> TrackItem? in
+                if case .track(let track) = item { return track }
+                return nil
+            }
+            store.play(tracks, at: tracks.firstIndex(where: { $0.id == track.id }) ?? 0, from: slug)
+        default: break
         }
     }
 }
@@ -349,6 +537,7 @@ struct ShelfView: View {
     @EnvironmentObject private var store: Store
     let shelf: Shelf
     let slug: String
+    var size: CGFloat = 140
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -358,7 +547,7 @@ struct ShelfView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(Array(shelf.items.enumerated()), id: \.offset) { index, item in
-                        MediaCard(item: item, slug: slug) { play(from: index) }
+                        MediaCard(item: item, slug: slug, size: size) { play(from: index) }
                     }
                 }
                 .padding(.horizontal)

@@ -48,7 +48,10 @@ class MainActivity : ComponentActivity() {
         setContent {
             SonoraTheme {
                 AskForNotifications()
-                SonoraRoot()
+                androidx.compose.foundation.layout.Box {
+                    SonoraRoot()
+                    Splash()
+                }
             }
         }
     }
@@ -65,19 +68,6 @@ class MainActivity : ComponentActivity() {
         val playing = Store.state?.status.let { it == Status.PLAYING || it == Status.LOADING }
         if (tv || !playing) Store.shutdown()
     }
-}
-
-@Composable
-fun SonoraTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val context = LocalContext.current
-    val colors = when {
-        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
-            if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        dark -> darkColorScheme()
-        else -> lightColorScheme()
-    }
-    MaterialTheme(colorScheme = colors, content = content)
 }
 
 /** Android 13+ pide permiso para mostrar la notificación con los controles. */

@@ -87,6 +87,19 @@ final class Store: ObservableObject {
 
     func account(_ slug: String) -> Account? { engine.account(slug: slug) }
 
+    // MARK: Personalización
+
+    @Published var palette = Palette(rawValue: UserDefaults.standard.string(forKey: "look.palette") ?? "") ?? .system {
+        didSet { UserDefaults.standard.set(palette.rawValue, forKey: "look.palette") }
+    }
+    @Published var appearance = Appearance(rawValue: UserDefaults.standard.string(forKey: "look.mode") ?? "") ?? .system {
+        didSet { UserDefaults.standard.set(appearance.rawValue, forKey: "look.mode") }
+    }
+    /// El nombre del saludo de Inicio («Hola, …»).
+    @Published var userName = UserDefaults.standard.string(forKey: "look.name") ?? "" {
+        didSet { UserDefaults.standard.set(userName, forKey: "look.name") }
+    }
+
     // MARK: Búsquedas recientes
 
     @Published private(set) var recentSearches: [String] =

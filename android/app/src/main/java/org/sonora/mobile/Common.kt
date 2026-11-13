@@ -387,32 +387,32 @@ fun PlayButtons(tracks: List<TrackItem>, slug: String) {
 // ── Tarjetas y filas ───────────────────────────────────────────────────────────────────────
 
 @Composable
-fun MediaCard(item: MediaItem, slug: String, onPlay: () -> Unit) {
+fun MediaCard(item: MediaItem, slug: String, size: Dp = 140.dp, onPlay: () -> Unit) {
     val nav = LocalNav.current
     var menu by remember { mutableStateOf(false) }
     when (item) {
         is MediaItem.Track -> Box {
             Card(item.track.cover, item.track.title, item.track.artists,
-                Modifier.focusRing().combinedClickable(onClick = onPlay, onLongClick = { menu = true }))
+                Modifier.focusRing().combinedClickable(onClick = onPlay, onLongClick = { menu = true }), size = size)
             TrackMenu(item.track, slug, menu, onDismiss = { menu = false })
         }
         is MediaItem.Album -> Card(item.album.cover, item.album.title, subtitle(item.album),
-            Modifier.focusRing().clickable { nav.navigate(Routes.album(slug, item.album.id)) })
+            Modifier.focusRing().clickable { nav.navigate(Routes.album(slug, item.album.id)) }, size = size)
         is MediaItem.Artist -> Card(item.artist.cover, item.artist.name, "Artista",
-            Modifier.focusRing().clickable { nav.navigate(Routes.artist(slug, item.artist.id)) }, round = true)
+            Modifier.focusRing().clickable { nav.navigate(Routes.artist(slug, item.artist.id)) }, round = true, size = size)
         is MediaItem.Playlist -> Card(item.playlist.cover, item.playlist.title, item.playlist.owner,
-            Modifier.focusRing().clickable { nav.navigate(Routes.playlist(slug, item.playlist.id)) })
-        is MediaItem.Genre -> Card(item.cover, item.title, "", Modifier.alpha(0.6f))
+            Modifier.focusRing().clickable { nav.navigate(Routes.playlist(slug, item.playlist.id)) }, size = size)
+        is MediaItem.Genre -> Card(item.cover, item.title, "", Modifier.alpha(0.6f), size = size)
     }
 }
 
 @Composable
-private fun Card(cover: String?, title: String, subtitle: String, modifier: Modifier, round: Boolean = false) {
+fun Card(cover: String?, title: String, subtitle: String, modifier: Modifier, round: Boolean = false, size: Dp = 140.dp) {
     Column(
-        modifier.width(140.dp).padding(4.dp),
+        modifier.width(size).padding(4.dp),
         horizontalAlignment = if (round) Alignment.CenterHorizontally else Alignment.Start,
     ) {
-        Cover(cover, 140.dp, round)
+        Cover(cover, size - 8.dp, round)
         Spacer(Modifier.size(6.dp))
         Text(
             title,

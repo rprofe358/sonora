@@ -3,6 +3,9 @@
 package org.sonora.mobile
 
 import android.content.Intent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.filled.Check
 import android.provider.DocumentsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -82,6 +85,7 @@ fun SettingsScreen() {
     Column(Modifier.fillMaxSize()) {
         Bar("Ajustes")
         LazyColumn(Modifier.fillMaxSize()) {
+            item { LookSection() }
             items(Store.providers, key = { it.slug }) { provider -> ProviderSection(provider) }
             item { SectionTitle("Ajustes") }
             item {
@@ -147,6 +151,83 @@ private fun ProviderSection(provider: ProviderInfo) {
             else -> null
         }
         note?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+}
+
+/** Tu nombre para el saludo, el tema de color y si la app va clara u oscura. */
+@Composable
+private fun LookSection() {
+    var name by remember { mutableStateOf(Store.userName) }
+    SectionTitle("Personalización")
+    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        OutlinedTextField(
+            value = name,
+            onValueChange = {
+                name = it.take(30)
+                Store.rename(name)
+            },
+            label = { Text("Tu nombre (para «Hola, …» en Inicio)") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text("Tema de color", style = MaterialTheme.typography.labelLarge)
+        androidx.compose.foundation.lazy.LazyRow(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(Palette.entries) { palette ->
+                val chosen = Store.palette == palette
+                Column(
+                    Modifier
+                        .width(72.dp)
+                        .focusRing(androidx.compose.foundation.shape.RoundedCornerShape(12.dp))
+                        .clickable { Store.choosePalette(palette) }
+                        .padding(4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Box(
+                        Modifier
+                            .size(48.dp)
+                            .background(
+                                palette.seed?.let { androidx.compose.ui.graphics.SolidColor(it) }
+                                    ?: androidx.compose.ui.graphics.Brush.sweepGradient(
+                                        listOf(
+                                            androidx.compose.ui.graphics.Color(0xFFE8742C),
+                                            androidx.compose.ui.graphics.Color(0xFF7E57C2),
+                                            androidx.compose.ui.graphics.Color(0xFF1E88E5),
+                                            androidx.compose.ui.graphics.Color(0xFF2E7D32),
+                                            androidx.compose.ui.graphics.Color(0xFFE8742C),
+                                        ),
+                                    ),
+                                androidx.compose.foundation.shape.CircleShape,
+                            )
+                            .then(
+                                if (chosen) {
+                                    Modifier.border(3.dp, MaterialTheme.colorScheme.onSurface, androidx.compose.foundation.shape.CircleShape)
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (chosen) Icon(Icons.Filled.Check, null, tint = androidx.compose.ui.graphics.Color.White)
+                    }
+                    Text(
+                        palette.label,
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 2,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    )
+                }
+            }
+        }
+        Text("Apariencia", style = MaterialTheme.typography.labelLarge)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Mode.entries.forEach { mode ->
+                androidx.compose.material3.FilterChip(
+                    selected = Store.mode == mode,
+                    onClick = { Store.chooseMode(mode) },
+                    label = { Text(mode.label) },
+                )
+            }
+        }
     }
 }
 

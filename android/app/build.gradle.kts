@@ -61,6 +61,7 @@ dependencies {
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("androidx.browser:browser:1.8.0")
     implementation("androidx.palette:palette-ktx:1.0.0")
+    implementation("com.airbnb.android:lottie-compose:6.6.0")
     implementation("io.coil-kt.coil3:coil-compose:3.0.4")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")
     // UniFFI llama al motor en Rust a través de JNA.

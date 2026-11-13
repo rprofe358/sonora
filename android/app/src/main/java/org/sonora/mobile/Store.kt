@@ -67,6 +67,7 @@ object Store : EngineListener {
         audio = saved ?: engine.audioSettings()
         refresh()
         loadRecent()
+        loadLook()
         restoreStored()
         // la música del teléfono aparece sola si ya hay permiso (salvo que se haya quitado)
         if (!preferences.getBoolean("local.off", false) && canReadMusic()) openLocal(quiet = true)
@@ -234,6 +235,37 @@ object Store : EngineListener {
             it.stopSelf()
         }
         main.postDelayed({ android.os.Process.killProcess(android.os.Process.myPid()) }, 300)
+    }
+
+    // ── Personalización ────────────────────────────────────────────────────────────────────
+
+    var palette by mutableStateOf(Palette.SYSTEM)
+        private set
+    var mode by mutableStateOf(Mode.SYSTEM)
+        private set
+    /** El nombre del saludo de Inicio («Hola, …»). */
+    var userName by mutableStateOf("")
+        private set
+
+    private fun loadLook() {
+        palette = runCatching { Palette.valueOf(preferences.getString("look.palette", "")!!) }.getOrDefault(Palette.SYSTEM)
+        mode = runCatching { Mode.valueOf(preferences.getString("look.mode", "")!!) }.getOrDefault(Mode.SYSTEM)
+        userName = preferences.getString("look.name", "")!!
+    }
+
+    fun choosePalette(value: Palette) {
+        palette = value
+        preferences.edit().putString("look.palette", value.name).apply()
+    }
+
+    fun chooseMode(value: Mode) {
+        mode = value
+        preferences.edit().putString("look.mode", value.name).apply()
+    }
+
+    fun rename(value: String) {
+        userName = value.trim()
+        preferences.edit().putString("look.name", userName).apply()
     }
 
     // ── Búsquedas recientes ────────────────────────────────────────────────────────────────

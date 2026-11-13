@@ -306,6 +306,7 @@ struct AccountsView: View {
     var body: some View {
         NavigationStack {
             List {
+                LookSection()
                 ForEach(store.providers.filter { $0.slug != "local" }, id: \.slug) { provider in
                     Section {
                         rows(for: provider)
@@ -374,6 +375,58 @@ struct AccountsView: View {
         case .anonymous: return "Usar sin cuenta (invitado)"
         case .secret: return "Iniciar sesión con Google"
         default: return "Iniciar sesión en \(provider.name)"
+        }
+    }
+}
+
+/// Tu nombre para el saludo, el tema de color y si la app va clara u oscura.
+struct LookSection: View {
+    @EnvironmentObject private var store: Store
+
+    var body: some View {
+        Section("Personalización") {
+            TextField("Tu nombre (para «Hola, …» en Inicio)", text: $store.userName)
+                .textInputAutocapitalization(.words)
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Tema de color").font(.subheadline)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 14) {
+                        ForEach(Palette.allCases) { palette in
+                            let chosen = store.palette == palette
+                            Button {
+                                store.palette = palette
+                            } label: {
+                                VStack(spacing: 4) {
+                                    Circle()
+                                        .fill(palette.color)
+                                        .frame(width: 44, height: 44)
+                                        .overlay {
+                                            if chosen {
+                                                Image(systemName: "checkmark")
+                                                    .font(.headline)
+                                                    .foregroundStyle(Color(.systemBackground))
+                                            }
+                                        }
+                                        .overlay(Circle().stroke(Color.primary, lineWidth: chosen ? 3 : 0).padding(-4))
+                                    Text(palette.label)
+                                        .font(.caption2)
+                                        .lineLimit(2)
+                                        .multilineTextAlignment(.center)
+                                        .frame(width: 70)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(palette.label)
+                        }
+                    }
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 4)
+                }
+            }
+            Picker("Apariencia", selection: $store.appearance) {
+                ForEach(Appearance.allCases) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.segmented)
         }
     }
 }

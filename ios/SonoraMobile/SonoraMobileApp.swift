@@ -3,11 +3,21 @@ import SwiftUI
 @main
 struct SonoraMobileApp: App {
     @StateObject private var store = Store()
+    @State private var splash = true
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environmentObject(store)
+            ZStack {
+                ContentView()
+                if splash {
+                    SplashView(showing: $splash)
+                        .transition(.opacity)
+                        .zIndex(1)
+                }
+            }
+            .environmentObject(store)
+            .tint(store.palette.color)
+            .preferredColorScheme(store.appearance.scheme)
         }
     }
 }
