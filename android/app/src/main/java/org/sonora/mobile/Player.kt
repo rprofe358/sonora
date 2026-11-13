@@ -267,9 +267,10 @@ fun PlayerScreen(onClose: () -> Unit) {
                         horizontalArrangement = Arrangement.spacedBy(if (wide) 40.dp else 24.dp),
                     ) {
                         BoxWithConstraints(Modifier.weight(0.42f).fillMaxHeight(), contentAlignment = Alignment.Center) {
-                            val cover = minOf(maxWidth * 0.8f, maxHeight * 0.48f)
+                            // lo que dejan el título, la barra y los botones, para que todo quepa sin cortarse
+                            val cover = minOf(maxWidth * 0.8f, maxHeight * 0.48f, maxHeight - 290.dp).coerceAtLeast(90.dp)
                             Column(
-                                Modifier.verticalScroll(rememberScrollState()),
+                                Modifier.verticalScroll(rememberScrollState()).padding(vertical = 12.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 verticalArrangement = Arrangement.spacedBy(12.dp),
                             ) {

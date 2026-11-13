@@ -88,7 +88,8 @@ struct PlayerView: View {
                 VStack(spacing: 10) {
                     Cover(
                         url: state.coverLarge ?? state.track?.cover,
-                        size: max(120, height * 0.45),
+                        // lo que dejan el título, la barra y los botones, para que todo quepa
+                        size: max(90, min(height * 0.45, height - 270)),
                         fallback: state.track?.cover
                     )
                     .shadow(color: .black.opacity(0.4), radius: 16, y: 8)
@@ -100,6 +101,9 @@ struct PlayerView: View {
                     controls(state)
                     remoteNote(state)
                 }
+                .padding(.vertical, 12)
+                // centrado en la altura, con aire arriba y abajo
+                .frame(minHeight: height, alignment: .center)
             }
             .scrollIndicators(.hidden)
             .frame(maxWidth: .infinity)
